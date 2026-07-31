@@ -65,7 +65,8 @@ C'est le vrai risque du « copie tel site » : une vitrine refaite de zéro a l'
 
 - **Données = JSON en base**, pas de schéma relationnel : `lib/db/store.ts` `read/write` → table `<prefix>_kv (key, value jsonb)`. Repli fichier `./data` si Supabase n'est pas configuré. Clés : `products`, `orders`, `customers`, `users`, `gateways`, `pixels`, `categories`, `pending_*`, `lock_*`.
 - **Actions serveur** : `lib/actions/{products,orders,categories,settings,pixels,auth,analytics,checkout}.ts`.
-- **Analytics** : tables `<prefix>_visits` et `<prefix>_visitors` (vrai schéma SQL, pas du KV) + présence temps réel Supabase.
+- **Analytics** : tables `<prefix>_visits` et `<prefix>_visitors` (vrai schéma SQL, pas du KV) + présence temps réel Supabase. Schéma versionné dans `supabase/schema.sql` (RLS activée, **aucune policy** : seule la clé service role accède aux données — ajouter une policy de lecture publique exposerait les commandes et les clients).
+- ⚠️ **Le projet Supabase est PARTAGÉ** entre les boutiques *et une application sans rapport*. Toute requête SQL doit filtrer sur le préfixe. Jamais de `drop`/`truncate` global.
 - ⚠️ `"use server"` = **uniquement des fonctions async exportées**. Une constante exportée dans un tel fichier fait échouer le build (mettre les constantes à part, ex. `lib/pixels-types.ts`).
 - ⚠️ Postgres réordonne les clés d'un `jsonb`. `read()` ne re-seede que si la clé est **absente** → pour rejouer un seed, supprimer la clé en base.
 
@@ -86,9 +87,11 @@ Le hub gère 9 passerelles ; **3 sont réellement câblées** : Stripe (Payment 
 
 ## 5. Checklist de mise en ligne
 
+**Le plus simple : la skill `/new-store`**, qui déroule tout ce qui suit. Sinon, à la main :
+
 **Automatisable (à faire) :**
-1. `config/store.config.ts` — préfixe unique de la boutique
-2. Tables Supabase `<prefix>_kv`, `<prefix>_visits`, `<prefix>_visitors` (DDL via le token Management dans le trousseau macOS — ⚠️ header `User-Agent` obligatoire, sinon Cloudflare 1010)
+1. `node scripts/create-store.mjs --prefix <p> --name "<Nom>" --dir <chemin>` — copie le modèle, écrit le préfixe, crée les 3 tables Supabase, initialise git avec le modèle en amont (`upstream`) et génère `.env.local` avec un `AUTH_SECRET`
+2. Compléter `.env.local`, puis `npm install`
 3. `config/brand.config.ts` — identité, palette, **mentions légales réelles**
 4. `config/fonts.ts`, `components/site/Logo.tsx`
 5. Vitrine + catalogue + photos (WebP dans `public/products`)
@@ -124,7 +127,19 @@ Le hub gère 9 passerelles ; **3 sont réellement câblées** : Stripe (Payment 
 
 ---
 
-## 8. État du modèle
+## 8. Faire redescendre un correctif du noyau
+
+Chaque boutique créée par le script a le modèle en amont. Pour lui porter une correction faite ici :
+
+```bash
+git fetch upstream && git merge upstream/main
+```
+
+Les conflits se limitent en principe à la peau (`config/*`, vitrine, catalogue), que la boutique possède. Si un conflit apparaît dans le noyau, c'est le signe qu'on a franchi la frontière de la §1.
+
+---
+
+## 9. État du modèle
 
 - Catalogue de démonstration : 4 produits neutres, visuels SVG de remplacement dans `public/products`.
 - `seedOrders` et `seedCustomers` **volontairement vides** : une boutique neuve ne doit pas afficher de fausses commandes ni un faux chiffre d'affaires.
