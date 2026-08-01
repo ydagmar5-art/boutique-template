@@ -3,18 +3,23 @@ import { brand } from "@/config/brand.config";
 import { formatPrice } from "@/lib/products";
 import { listProducts } from "@/lib/actions/products";
 import DeleteProductButton from "@/components/admin/DeleteProductButton";
+import ToggleProductButton from "@/components/admin/ToggleProductButton";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminProducts() {
   const products = await listProducts();
+  const hiddenCount = products.filter((p) => p.hidden).length;
 
   return (
     <div>
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="font-heading text-3xl">Catalogue</h1>
-          <p className="text-sm text-muted">{products.length} produits</p>
+          <p className="text-sm text-muted">
+            {products.length} produits
+            {hiddenCount > 0 && ` · ${hiddenCount} masqué${hiddenCount > 1 ? "s" : ""}`}
+          </p>
         </div>
         <Link
           href="/admin/products/new"
@@ -43,9 +48,20 @@ export default async function AdminProducts() {
                   <td className="px-6 py-3.5">
                     <div className="flex items-center gap-3">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.images[0]} alt={p.name} className="h-11 w-9 rounded-md object-cover" />
+                      <img
+                        src={p.images[0]}
+                        alt={p.name}
+                        className={`h-11 w-9 rounded-md object-cover ${p.hidden ? "opacity-40 grayscale" : ""}`}
+                      />
                       <div>
-                        <p className="font-medium">{p.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`font-medium ${p.hidden ? "text-muted" : ""}`}>{p.name}</p>
+                          {p.hidden && (
+                            <span className="rounded-full bg-line px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted">
+                              Masqué
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted">{p.variants.length} variantes</p>
                       </div>
                     </div>
@@ -65,6 +81,7 @@ export default async function AdminProducts() {
                   </td>
                   <td className="px-6 py-3.5">
                     <div className="flex items-center justify-end gap-4">
+                      <ToggleProductButton slug={p.slug} hidden={!!p.hidden} />
                       <Link href={`/admin/products/${p.slug}/edit`} className="text-sm text-muted hover:text-ink">
                         Modifier
                       </Link>

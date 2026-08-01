@@ -3,8 +3,9 @@ import { brand } from "@/config/brand.config";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { seedProducts } from "@/lib/products";
-import { getProduct } from "@/lib/actions/products";
+import { getVisibleProduct } from "@/lib/actions/products";
 import AddToCart from "@/components/shop/AddToCart";
+import ProductGallery from "@/components/shop/ProductGallery";
 import Reassurances from "@/components/site/Reassurances";
 import PaymentBadges from "@/components/site/PaymentBadges";
 
@@ -20,7 +21,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const product = await getProduct(slug);
+  const product = await getVisibleProduct(slug);
   if (!product) return { title: "Produit introuvable" };
   return { title: product.name, description: product.tagline };
 }
@@ -31,7 +32,7 @@ export default async function ProductPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const product = await getProduct(slug);
+  const product = await getVisibleProduct(slug);
   if (!product) notFound();
 
   return (
@@ -46,32 +47,7 @@ export default async function ProductPage({
 
       <div className="grid gap-12 md:grid-cols-2">
         {/* Galerie */}
-        <div className="space-y-4">
-          <div className="grain overflow-hidden rounded-[2rem] bg-surface">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={product.images[0]}
-              alt={product.name}
-              loading="eager"
-              decoding="async"
-              width={900}
-              height={1125}
-              className="aspect-[4/5] w-full object-cover"
-            />
-          </div>
-          {product.images[1] && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={product.images[1]}
-              alt={`${product.name} détail`}
-              loading="lazy"
-              decoding="async"
-              width={900}
-              height={563}
-              className="aspect-[16/10] w-full rounded-2xl object-cover"
-            />
-          )}
-        </div>
+        <ProductGallery images={product.images} name={product.name} />
 
         {/* Infos */}
         <div className="md:py-4">

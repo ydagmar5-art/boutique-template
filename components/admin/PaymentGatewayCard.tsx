@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { PaymentProvider, PspMode } from "@/lib/payments/types";
 import { saveGateway, type GatewaySaved } from "@/lib/actions/settings";
 
@@ -18,22 +19,49 @@ export default function PaymentGatewayCard({
   const [values, setValues] = useState<Record<string, string>>(initial?.values ?? {});
   const [secretsSet, setSecretsSet] = useState<string[]>(initial?.secretsSet ?? []);
   const [saved, setSaved] = useState(false);
+  const [refus, setRefus] = useState("");
   const [pending, start] = useTransition();
+  const router = useRouter();
+
+  // Activer une autre passerelle éteint celle-ci côté serveur : il faut que
+  // l'interrupteur suive, sinon deux cartes s'afficheraient comme actives.
+  useEffect(() => {
+    setEnabled(initial?.enabled ?? false);
+  }, [initial?.enabled]);
 
   const fields = provider.fields[mode];
 
+  /**
+   * Une seule passerelle est active à la fois : après un changement, on
+   * recharge la page pour que les autres cartes reflètent leur extinction.
+   */
   const persist = (next: { enabled: boolean; mode: PspMode }) =>
     start(async () => {
-      await saveGateway(provider.id, {
+      const res = await saveGateway(provider.id, {
         enabled: next.enabled,
         mode: next.mode,
         credentials: values,
       });
+      if (!res.ok) {
+        // Refus (clés manquantes) : on remet l'interrupteur dans son état réel.
+        setEnabled(false);
+        setRefus(res.error ?? "Activation impossible.");
+        setOpen(true);
+        return;
+      }
+      setRefus("");
+      router.refresh();
     });
 
   const save = () =>
     start(async () => {
-      await saveGateway(provider.id, { enabled, mode, credentials: values });
+      const res = await saveGateway(provider.id, { enabled, mode, credentials: values });
+      if (!res.ok) {
+        setEnabled(false);
+        setRefus(res.error ?? "Enregistrement impossible.");
+        return;
+      }
+      setRefus("");
       // Marque comme enregistrés les secrets qui viennent d'être saisis.
       const newlySet = fields
         .filter((f) => f.secret && values[f.key])
@@ -92,6 +120,12 @@ export default function PaymentGatewayCard({
           </button>
         </div>
       </div>
+
+      {refus && (
+        <p className="border-t border-line bg-secondary/5 px-5 py-3 text-sm text-secondary">
+          {refus}
+        </p>
+      )}
 
       {open && (
         <div className="border-t border-line p-5">

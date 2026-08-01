@@ -3,6 +3,7 @@
 import Stripe from "stripe";
 import { headers } from "next/headers";
 import { brand } from "@/config/brand.config";
+import { store } from "@/config/store.config";
 import { firstEnabledGateway, getGatewayConfig } from "@/lib/payments/gateway-store";
 import {
   fondyCheckoutUrl,
@@ -11,6 +12,19 @@ import {
   fondyToken,
   newFondyOrderId,
 } from "@/lib/payments/fondy";
+import {
+  AIRWALLEX_SUCCESS,
+  airwallexCreateIntent,
+  airwallexCreds,
+  airwallexGetIntent,
+} from "@/lib/payments/airwallex";
+import {
+  genomeAmountInCents,
+  genomeCheckoutUrl,
+  genomeCreds,
+  newGenomeOrderId,
+  type GenomeCallback,
+} from "@/lib/payments/genome";
 import { createOrderOnce } from "@/lib/payments/finalize";
 import { createOrder } from "@/lib/actions/orders";
 import { read, write } from "@/lib/db/store";
@@ -147,6 +161,32 @@ export async function startCheckout(
       orderId: null,
     });
     return { url };
+  }
+
+  // ── Genome : page de paiement hébergée (redirection + callback signé) ──
+  if (active.id === "genome") {
+    const creds = genomeCreds(active.config.credentials);
+    if (!creds) return { error: "Clés Genome manquantes (clé et secret API)." };
+    const orderId = newGenomeOrderId();
+    const base = await origin();
+    await write(genomeKey(orderId), {
+      draft,
+      amount: draft.total,
+      done: false,
+      orderId: null,
+    });
+    return {
+      url: genomeCheckoutUrl(creds, {
+        orderId,
+        amount: draft.total,
+        currency: brand.currency,
+        description: `Commande ${brand.name}`,
+        successUrl: `${base}/api/genome/return?o=${encodeURIComponent(orderId)}`,
+        failureUrl: `${base}/checkout?error=${encodeURIComponent("Le paiement a été refusé.")}`,
+        email: draft.email,
+        lang: brand.locale.split("-")[0],
+      }),
+    };
   }
 
   // ── Autres PSP : clés stockées, intégration à finaliser ──
@@ -291,6 +331,200 @@ export async function finalizeFondyPayment(
     await write(fondyKey(orderId), { ...pending, done: true, orderId: id });
     return id;
   });
+}
+
+/* ───────────────────────────── Airwallex ───────────────────────────── */
+
+const airwallexKey = (intentId: string) => `pending_aw_${intentId}`;
+
+interface AirwallexPending {
+  /** Montant figé à la création de l'intent — fait foi face au brouillon client. */
+  amount: number;
+  done: boolean;
+  orderId: string | null;
+}
+
+/**
+ * Prépare un paiement Airwallex EMBARQUÉ : crée le PaymentIntent et renvoie au
+ * navigateur de quoi monter le Drop-in. Appelé au montage du formulaire, donc
+ * avant que le client ait saisi ses coordonnées — seul le montant compte ici.
+ */
+export async function createAirwallexIntent(amount: number): Promise<{
+  intentId?: string;
+  clientSecret?: string;
+  env?: "demo" | "prod";
+  currency?: string;
+  error?: string;
+}> {
+  const cfg = await getGatewayConfig("airwallex");
+  if (!cfg?.enabled) return { error: "Airwallex n'est pas activé." };
+  const creds = airwallexCreds(cfg.credentials);
+  if (!creds) return { error: "Clés Airwallex manquantes (Client ID / clé API)." };
+  if (!Number.isInteger(amount) || amount <= 0) return { error: "Montant invalide." };
+
+  const live = cfg.mode === "live";
+  const { intent, error } = await airwallexCreateIntent(creds, live, {
+    amount,
+    currency: brand.currency,
+    // Préfixe technique (et non le nom commercial) : c'est lui qui isole les
+    // boutiques entre elles, et il reste stable si la marque est renommée.
+    merchantOrderId: `${store.prefix.toUpperCase()}-${Date.now().toString(36)}`,
+    returnUrl: `${await origin()}/checkout`,
+  });
+  if (error || !intent) return { error: error ?? "Airwallex : initialisation impossible." };
+
+  await write(airwallexKey(intent.id), { amount, done: false, orderId: null });
+  return {
+    intentId: intent.id,
+    clientSecret: intent.clientSecret,
+    env: live ? "prod" : "demo",
+    currency: intent.currency,
+  };
+}
+
+/**
+ * Transforme un paiement Airwallex confirmé en commande.
+ *
+ * ⚠️ Le succès annoncé par le SDK n'est qu'une information venant du navigateur
+ * du client : on relit systématiquement l'intent auprès d'Airwallex avant
+ * d'enregistrer quoi que ce soit.
+ */
+export async function finalizeAirwallexPayment(input: {
+  intentId: string;
+  draft: CheckoutDraft;
+}): Promise<{ orderId?: string; error?: string }> {
+  const cfg = await getGatewayConfig("airwallex");
+  if (!cfg?.enabled) return { error: "Airwallex n'est pas activé." };
+  const creds = airwallexCreds(cfg.credentials);
+  if (!creds) return { error: "Clés Airwallex manquantes." };
+
+  const pending = await read<AirwallexPending | null>(
+    airwallexKey(input.intentId),
+    null,
+  );
+  if (!pending) return { error: "Paiement introuvable." };
+  if (pending.done && pending.orderId) return { orderId: pending.orderId };
+
+  const { intent, error } = await airwallexGetIntent(
+    creds,
+    cfg.mode === "live",
+    input.intentId,
+  );
+  if (error || !intent) return { error: error ?? "Airwallex : statut indisponible." };
+
+  if (intent.status !== AIRWALLEX_SUCCESS) {
+    return { error: "Le paiement n'a pas été confirmé." };
+  }
+  // Le montant réellement encaissé fait foi, jamais le total envoyé par le client.
+  if (intent.amount !== pending.amount) {
+    return { error: "Montant encaissé incohérent, contactez-nous." };
+  }
+
+  return (
+    await createOrderOnce(
+      `aw_${input.intentId}`,
+      airwallexKey(input.intentId),
+      async () => {
+        const { id } = await createOrder({
+          customer: input.draft.customer,
+          email: input.draft.email,
+          address: input.draft.address,
+          items: input.draft.items,
+          total: pending.amount,
+          psp: "Airwallex",
+        });
+        await write(airwallexKey(input.intentId), {
+          ...pending,
+          done: true,
+          orderId: id,
+        });
+        return id;
+      },
+    )
+  );
+}
+
+/* ────────────────────────────── Genome ────────────────────────────── */
+
+const genomeKey = (orderId: string) => `pending_gn_${orderId}`;
+
+interface GenomePending {
+  draft: CheckoutDraft;
+  /** Montant figé à la création du jeton — fait foi face au callback. */
+  amount: number;
+  done: boolean;
+  orderId: string | null;
+  refused?: boolean;
+}
+
+/**
+ * Transforme un callback Genome VÉRIFIÉ en commande.
+ *
+ * ⚠️ À n'appeler qu'après validation de la signature (`genomeVerifyCallback`) :
+ * cette fonction fait confiance au contenu qu'on lui passe. Contrairement à
+ * Fondy, aucun second appel d'API ne peut confirmer le paiement — le callback
+ * signé est la seule source de vérité, d'où l'exigence sur la signature.
+ */
+export async function finalizeGenomePayment(
+  callback: GenomeCallback,
+): Promise<{ orderId?: string; error?: string; pending?: true }> {
+  const orderId = callback.order?.id;
+  if (!orderId) return { error: "Identifiant de commande absent du callback." };
+
+  const pending = await read<GenomePending | null>(genomeKey(orderId), null);
+  if (!pending) return { error: "Paiement introuvable." };
+  if (pending.done && pending.orderId) return { orderId: pending.orderId };
+
+  if (callback.event === "INCOMING_DECLINE") {
+    if (!pending.refused) {
+      await sendPaymentRefused(pending.draft.email, pending.draft.customer);
+      await write(genomeKey(orderId), { ...pending, refused: true });
+    }
+    return { error: "Paiement refusé." };
+  }
+
+  // INCOMING_PAYMENT_CREATED / INCOMING_PLEDGE : le paiement n'est pas encaissé,
+  // un INCOMING_SUCCESS suivra (ou non).
+  if (callback.event !== "INCOMING_SUCCESS") return { pending: true };
+
+  // Le montant annoncé par Genome fait foi : s'il ne correspond pas à celui que
+  // nous avons signé, on n'enregistre rien et le gérant tranche à la main.
+  const paid = genomeAmountInCents(callback);
+  if (paid === null || paid !== pending.amount)
+    return { error: "Montant encaissé incohérent, contactez-nous." };
+
+  // Genome réémet ses callbacks tant qu'il n'a pas reçu de 200 : le verrou
+  // garantit qu'un seul d'entre eux crée la commande.
+  return createOrderOnce(`gn_${orderId}`, genomeKey(orderId), async () => {
+    const { id } = await createOrder({
+      customer: pending.draft.customer,
+      email: pending.draft.email,
+      address: pending.draft.address,
+      items: pending.draft.items,
+      total: pending.draft.total,
+      psp: "Genome",
+    });
+    await write(genomeKey(orderId), { ...pending, done: true, orderId: id });
+    return id;
+  });
+}
+
+/**
+ * Consultée par la page de retour : la commande est-elle déjà enregistrée ?
+ *
+ * Le navigateur revient souvent avant le callback serveur. Sans API de statut
+ * chez Genome, on ne peut qu'attendre — d'où ces quelques secondes de patience
+ * avant d'afficher « en cours de validation » plutôt qu'une erreur.
+ */
+export async function awaitGenomeOrder(
+  orderId: string,
+): Promise<{ orderId?: string; pending?: true }> {
+  for (let i = 0; i < 12; i++) {
+    const pending = await read<GenomePending | null>(genomeKey(orderId), null);
+    if (pending?.done && pending.orderId) return { orderId: pending.orderId };
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return { pending: true };
 }
 
 /**

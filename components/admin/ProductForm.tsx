@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { brand } from "@/config/brand.config";
+import ImageUploader from "@/components/admin/ImageUploader";
 import { useState, useTransition } from "react";
 import { saveProduct } from "@/lib/actions/products";
 import type { Product, ProductVariant } from "@/lib/products";
@@ -32,9 +33,10 @@ export default function ProductForm({
   const [material, setMaterial] = useState(product?.material ?? "");
   const [detail, setDetail] = useState(product?.detail ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
-  const [images, setImages] = useState((product?.images ?? []).join("\n"));
+  const [images, setImages] = useState<string[]>(product?.images ?? []);
   const [featured, setFeatured] = useState(product?.featured ?? false);
   const [manageStock, setManageStock] = useState(product?.manageStock ?? false);
+  const [hidden, setHidden] = useState(product?.hidden ?? false);
   const [variants, setVariants] = useState<VariantDraft[]>(
     product?.variants.map((v) => ({
       id: v.id,
@@ -59,9 +61,10 @@ export default function ProductForm({
       material,
       detail,
       description,
-      images: images.split("\n").map((s) => s.trim()).filter(Boolean),
+      images,
       featured,
       manageStock,
+      hidden,
       variants: variants.map<ProductVariant>((v) => ({
         id: v.id || slugify(v.label) || "v",
         label: v.label,
@@ -113,9 +116,7 @@ export default function ProductForm({
         <textarea className={`${field} min-h-24`} value={description} onChange={(e) => setDescription(e.target.value)} />
       </Label>
 
-      <Label text="Images (une URL par ligne)">
-        <textarea className={`${field} min-h-20 font-mono text-xs`} value={images} onChange={(e) => setImages(e.target.value)} />
-      </Label>
+      <ImageUploader value={images} onChange={setImages} />
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} className="accent-primary" />
@@ -127,6 +128,14 @@ export default function ProductForm({
         Gérer le stock de ce produit
         <span className="text-xs text-muted">
           (si décoché, le stock n&apos;est pas affiché au client et le produit est toujours disponible)
+        </span>
+      </label>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} className="accent-primary" />
+        Masquer ce produit de la boutique
+        <span className="text-xs text-muted">
+          (il reste dans le back-office, mais devient introuvable pour les clients)
         </span>
       </label>
 

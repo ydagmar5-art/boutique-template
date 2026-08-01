@@ -1,5 +1,6 @@
 import { brand } from "@/config/brand.config";
 import { PAYMENT_PROVIDERS } from "@/lib/payments/providers";
+import { publicConfigFor } from "@/lib/payments/public-config";
 import { getGateways } from "@/lib/actions/settings";
 import CheckoutClient, { type ActivePayment } from "@/components/shop/CheckoutClient";
 
@@ -16,48 +17,25 @@ export default async function CheckoutPage({
 
   let active: ActivePayment | null = null;
   if (activeId) {
-    const kind =
-      activeId === "test"
-        ? "test"
-        : activeId === "stripe"
-        ? "stripe"
-        : activeId === "square"
-        ? "square"
-        : activeId === "fondy"
-        ? "fondy"
-        : "other";
+    const gateway = saved[activeId];
+    // Un PSP s'affiche sur place s'il expose une config publique exploitable.
+    // Clés incomplètes ou PSP sans champs hébergés (Genome) → redirection : le
+    // repli est toujours le mode le plus sûr, jamais un widget mort.
+    const config = publicConfigFor(
+      activeId,
+      gateway?.values,
+      gateway?.mode === "live" ? "live" : "test",
+      gateway?.secretsSet,
+    );
 
     active = {
+      id: activeId,
       name: PAYMENT_PROVIDERS[activeId]?.name ?? activeId,
-      kind,
+      mode: activeId === "test" ? "test" : config ? "embedded" : "redirect",
+      config: config ?? {},
     };
-
-    // Stripe embarqué : la clé publishable est destinée au navigateur (la clé
-    // secrète, elle, ne quitte jamais le serveur).
-    if (activeId === "stripe") {
-      const pk = saved.stripe?.values?.publicKey;
-      if (pk) active.stripe = { publishableKey: pk };
-    }
-
-    // Square embarqué : appId + locationId (non-secrets) transmis au client.
-    if (activeId === "square") {
-      const v = saved.square?.values ?? {};
-      if (v.applicationId && v.locationId) {
-        active.square = {
-          applicationId: v.applicationId,
-          locationId: v.locationId,
-          sandbox: saved.square?.mode !== "live",
-        };
-      }
-    }
-    // Fondy embarqué : seul le Merchant ID part au navigateur. Le mot de passe
-    // marchand reste côté serveur (il signe le jeton de paiement).
-    if (activeId === "fondy") {
-      const merchantId = saved.fondy?.values?.merchantId;
-      if (merchantId) active.fondy = { merchantId };
-    }
   }
 
-  // Un paiement PSP qui échoue renvoie le client ici avec ?error=… (Fondy).
+  // Un paiement PSP qui échoue renvoie le client ici avec ?error=…
   return <CheckoutClient payment={active} initialError={error ?? ""} />;
 }

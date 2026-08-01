@@ -6,18 +6,22 @@ import { useRouter } from "next/navigation";
 import { brand } from "@/config/brand.config";
 import { useCart, cartTotal } from "@/lib/cart/store";
 import { formatPrice } from "@/lib/products";
-import { startCheckout, paySquare } from "@/lib/actions/checkout";
-import SquareCard, { type SquareConfirm } from "@/components/shop/SquareCard";
-import StripeCard, { type StripeConfirm } from "@/components/shop/StripeCard";
-import FondyCard, { type FondyConfirm } from "@/components/shop/FondyCard";
+import { startCheckout } from "@/lib/actions/checkout";
+import { embeddedPsp, type ConfirmFn } from "@/components/shop/payment/registry";
 import PaymentBadges from "@/components/site/PaymentBadges";
 
+/**
+ * Le PSP actif, tel que le serveur le décrit. Le checkout ne sait rien de
+ * Stripe, Square ou Fondy en particulier : il sait seulement si le paiement se
+ * règle sur place (`embedded`, cf. `components/shop/payment/registry.tsx`) ou
+ * par redirection.
+ */
 export interface ActivePayment {
+  id: string;
   name: string;
-  kind: "test" | "stripe" | "square" | "fondy" | "other";
-  stripe?: { publishableKey: string };
-  square?: { applicationId: string; locationId: string; sandbox: boolean };
-  fondy?: { merchantId: string };
+  mode: "test" | "embedded" | "redirect";
+  /** Clés publiques du PSP (cf. `lib/payments/public-config.ts`). */
+  config: Record<string, string | boolean>;
 }
 
 export default function CheckoutClient({
@@ -33,12 +37,16 @@ export default function CheckoutClient({
   const [pending, start] = useTransition();
   const [error, setError] = useState(initialError);
   const total = cartTotal(lines);
-  const squareConfirm = useRef<SquareConfirm | null>(null);
-  const stripeConfirm = useRef<StripeConfirm | null>(null);
-  const fondyConfirm = useRef<FondyConfirm | null>(null);
-  // Widget Fondy indisponible (script bloqué, clés invalides…) : on bascule sur
-  // la page de paiement hébergée plutôt que de laisser le client sans solution.
-  const [fondyDown, setFondyDown] = useState(false);
+  const confirm = useRef<ConfirmFn | null>(null);
+  // Widget indisponible (script bloqué, clés invalides…) : on bascule sur la
+  // page hébergée du PSP plutôt que de laisser le client sans solution.
+  const [widgetDown, setWidgetDown] = useState(false);
+
+  const entry = payment?.mode === "embedded" ? embeddedPsp(payment.id) : undefined;
+  const psp = widgetDown ? undefined : entry;
+  /** Widget tombé sans page hébergée de secours : on ne promet pas une
+   *  redirection qui n'aboutirait pas. */
+  const deadEnd = widgetDown && !entry?.hostedFallback;
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -61,31 +69,30 @@ export default function CheckoutClient({
     };
 
     start(async () => {
-      // Square embarqué : tokenisation + 3-D Secure, puis encaissement, sans
-      // quitter le site (le défi bancaire s'affiche en fenêtre modale Square).
-      if (payment.kind === "square" && payment.square) {
-        const card = await squareConfirm.current?.({
-          amount: total,
-          currency: brand.currency,
-          givenName: String(fd.get("firstName") ?? ""),
-          familyName: String(fd.get("lastName") ?? ""),
-          email: draft.email,
-          addressLines: [String(fd.get("address") ?? "")],
-          city: String(fd.get("city") ?? ""),
-          postalCode: String(fd.get("zip") ?? ""),
-          countryCode: "FR",
-        });
-        if (!card || card.error || !card.token) {
-          setError(card?.error ?? "Veuillez saisir une carte valide.");
-          return;
-        }
-        const res = await paySquare({
-          token: card.token,
-          verificationToken: card.verificationToken,
+      // ── Paiement sur place : le PSP encaisse sans quitter le site ──
+      if (psp && confirm.current) {
+        const res = await confirm.current({
           draft,
+          amount: total,
+          buyer: {
+            firstName: String(fd.get("firstName") ?? ""),
+            lastName: String(fd.get("lastName") ?? ""),
+            email: draft.email,
+            address: String(fd.get("address") ?? ""),
+            city: String(fd.get("city") ?? ""),
+            zip: String(fd.get("zip") ?? ""),
+            countryCode: "FR",
+          },
         });
-        if (res.error || !res.orderId) {
-          setError(res.error ?? "Le paiement a échoué.");
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        // Le PSP a pris la main sur la navigation (3-D Secure, retour propre) :
+        // ne rien faire d'autre, surtout pas vider le panier.
+        if (res.handled) return;
+        if (!res.orderId) {
+          setError("Le paiement a échoué.");
           return;
         }
         clear();
@@ -93,27 +100,7 @@ export default function CheckoutClient({
         return;
       }
 
-      // Stripe embarqué : la carte est déjà saisie, on encaisse sur place.
-      if (payment.kind === "stripe" && stripeConfirm.current) {
-        const res = await stripeConfirm.current(draft);
-        if (res.error || !res.orderId) {
-          setError(res.error ?? "Le paiement a échoué.");
-          return;
-        }
-        clear();
-        router.push(`/order/${res.orderId}`);
-        return;
-      }
-
-      // Fondy embarqué : le widget encaisse puis renvoie lui-même le navigateur
-      // sur /api/fondy/return (3-D Secure compris) — on ne rend la main qu'en
-      // cas d'échec.
-      if (payment.kind === "fondy" && fondyConfirm.current && !fondyDown) {
-        const res = await fondyConfirm.current(draft);
-        if (res.error) setError(res.error);
-        return;
-      }
-
+      // ── Sinon : page de paiement hébergée du PSP ──
       const res = await startCheckout(draft);
       if (res.error || !res.url) {
         setError(res.error ?? "Impossible de démarrer le paiement.");
@@ -164,15 +151,9 @@ export default function CheckoutClient({
               Aucun moyen de paiement n&apos;est disponible pour le moment.
               Veuillez réessayer plus tard.
             </div>
-          ) : payment.kind === "test" ? (
+          ) : payment.mode === "test" ? (
             <section>
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-heading text-xl">Paiement par carte</h2>
-                <span className="flex items-center gap-1.5 text-xs text-muted">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-organic" />
-                  Sécurisé
-                </span>
-              </div>
+              <SectionTitle />
               <div className="rounded-xl border border-line bg-surface p-4">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-muted">Numéro de carte</span>
@@ -197,55 +178,41 @@ export default function CheckoutClient({
                 Mode TEST : le paiement est validé automatiquement, aucun débit réel.
               </p>
             </section>
-          ) : payment.kind === "square" && payment.square ? (
+          ) : psp ? (
             <section>
-              <h2 className="mb-4 font-heading text-xl">Paiement par carte</h2>
-              <SquareCard
-                applicationId={payment.square.applicationId}
-                locationId={payment.square.locationId}
-                sandbox={payment.square.sandbox}
-                onReady={(fn) => {
-                  squareConfirm.current = fn;
-                }}
-              />
-            </section>
-          ) : payment.kind === "fondy" && payment.fondy && !fondyDown ? (
-            <section>
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-heading text-xl">Paiement par carte</h2>
-                <span className="flex items-center gap-1.5 text-xs text-muted">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-organic" />
-                  Sécurisé
-                </span>
-              </div>
-              <div className="rounded-xl border border-line bg-surface p-4">
-                <FondyCard
-                  merchantId={payment.fondy.merchantId}
+              <SectionTitle />
+              {/* Champs hébergés par le PSP : la carte part du navigateur
+                  directement chez lui, sans passer par nos serveurs. */}
+              {psp.framed ? (
+                <div className="rounded-xl border border-line bg-surface p-4">
+                  <psp.Fields
+                    config={payment.config}
+                    amount={total}
+                    onReady={(fn) => {
+                      confirm.current = fn;
+                    }}
+                    onUnavailable={() => setWidgetDown(true)}
+                  />
+                </div>
+              ) : (
+                <psp.Fields
+                  config={payment.config}
                   amount={total}
                   onReady={(fn) => {
-                    fondyConfirm.current = fn;
+                    confirm.current = fn;
                   }}
-                  onUnavailable={() => setFondyDown(true)}
+                  onUnavailable={() => setWidgetDown(true)}
                 />
-              </div>
+              )}
             </section>
-          ) : payment.kind === "stripe" && payment.stripe ? (
+          ) : deadEnd ? (
             <section>
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-heading text-xl">Paiement par carte</h2>
-                <span className="flex items-center gap-1.5 text-xs text-muted">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-organic" />
-                  Sécurisé
-                </span>
-              </div>
-              <div className="rounded-xl border border-line bg-surface p-4">
-                <StripeCard
-                  publishableKey={payment.stripe.publishableKey}
-                  amount={total}
-                  onReady={(fn) => {
-                    stripeConfirm.current = fn;
-                  }}
-                />
+              <h2 className="mb-4 font-heading text-xl">Paiement indisponible</h2>
+              <div className="rounded-xl border border-dashed border-secondary/50 bg-secondary/5 p-6 text-sm text-secondary">
+                <p>
+                  Le paiement par carte est momentanément indisponible. Merci de
+                  réessayer dans quelques instants — votre panier est conservé.
+                </p>
               </div>
             </section>
           ) : (
@@ -268,7 +235,7 @@ export default function CheckoutClient({
 
           <button
             type="submit"
-            disabled={pending || !payment}
+            disabled={pending || !payment || deadEnd}
             className="w-full rounded-full bg-ink py-4 text-sm font-medium text-bg transition-all duration-300 hover:scale-[0.99] hover:bg-primary-dark disabled:opacity-60"
           >
             {pending ? "Traitement…" : `Payer ${formatPrice(total, brand.currency, brand.locale)}`}
@@ -308,7 +275,12 @@ export default function CheckoutClient({
             <Row label="Sous-total" value={formatPrice(total, brand.currency, brand.locale)} />
             <div className="flex items-center justify-between text-muted">
               <span>Livraison</span>
-              <span className="font-medium text-organic">{brand.shippingNote}</span>
+              <span className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded bg-[#FFCC00] px-1.5 py-0.5 text-[10px] font-bold italic text-[#D40511]">
+                  DHL
+                </span>
+                <span className="font-medium text-organic">Offerte</span>
+              </span>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
@@ -316,10 +288,22 @@ export default function CheckoutClient({
             <span className="font-heading text-2xl">{formatPrice(total, brand.currency, brand.locale)}</span>
           </div>
           <p className="mt-4 flex items-center gap-2 rounded-xl bg-bg px-3 py-2.5 text-xs text-muted">
-            <span>🚚</span> {brand.shippingNote}
+            <span>🚚</span> Livraison offerte avec DHL · expédiée sous 24–48 h
           </p>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function SectionTitle() {
+  return (
+    <div className="mb-4 flex items-center justify-between">
+      <h2 className="font-heading text-xl">Paiement par carte</h2>
+      <span className="flex items-center gap-1.5 text-xs text-muted">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-organic" />
+        Sécurisé
+      </span>
     </div>
   );
 }

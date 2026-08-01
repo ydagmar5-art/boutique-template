@@ -26,7 +26,8 @@ export type PaymentProviderId =
   | "viva"
   | "mypos"
   | "whop"
-  | "airwallex";
+  | "airwallex"
+  | "genome";
 
 export interface BrandConfig {
   name: string;
@@ -134,7 +135,7 @@ export const brand: BrandConfig = {
   ],
 
   // Passerelles proposées dans le back-office (test + 8 PSP réels).
-  payments: ["test", "stripe", "square", "fondy", "zen", "viva", "mypos", "whop", "airwallex"],
+  payments: ["test", "stripe", "square", "fondy", "zen", "viva", "mypos", "whop", "airwallex", "genome"],
 
   /**
    * ⚠️ OBLIGATOIRE AVANT MISE EN LIGNE. Ces champs alimentent les mentions

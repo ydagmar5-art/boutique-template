@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { brand } from "@/config/brand.config";
-import { listProducts } from "@/lib/actions/products";
+import { listVisibleProducts } from "@/lib/actions/products";
 import CollectionBrowser from "@/components/shop/CollectionBrowser";
 
 export const metadata: Metadata = {
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
-  const products = await listProducts();
+  const products = await listVisibleProducts();
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-14 sm:px-8 md:py-20">

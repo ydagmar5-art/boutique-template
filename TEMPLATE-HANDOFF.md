@@ -63,6 +63,9 @@ C'est le vrai risque du « copie tel site » : une vitrine refaite de zéro a l'
 
 ## 3. Architecture
 
+- **Catalogue** : `Product.hidden` retire un produit de la boutique (listes + fiche en **404**) sans le supprimer — bouton *Masquer/Afficher* dans `/admin/products`. La vitrine passe par `listVisibleProducts()` / `getVisibleProduct()`, le back-office par `listProducts()` (qui voit tout). ⚠️ Une vitrine réécrite qui appellerait `listProducts()` **afficherait les produits masqués**.
+- **Photos produit** : `components/admin/ImageUploader.tsx` (glisser-déposer, réordonnancement, 1ʳᵉ image = principale). Le navigateur convertit en WebP 1600 px avant l'envoi ; `next.config.mjs` relève `serverActions.bodySizeLimit` à 10 Mo. Stockage : `lib/db/media.ts` → bucket Supabase **`<prefix>-media`**, créé au premier upload, repli `public/uploads` en dev. ⚠️ Le bucket est **préfixé comme les tables** : un bucket commun ferait apparaître les photos d'une boutique dans le back-office d'une autre.
+- **Galerie fiche produit** : `components/shop/ProductGallery.tsx` affiche **toutes** les photos (vignettes, flèches, clavier). Cadre fixe **portrait 3/4** en `object-cover`, choisi parce que c'est le format de sortie le plus courant des photos produit. ⚠️ Les photos très allongées (9/16) perdent ~26 % de hauteur : **cadrer le sujet au centre**. Même contrainte sur `ProductCard` (cover 4/5) → la **1ʳᵉ photo doit être en portrait**.
 - **Données = JSON en base**, pas de schéma relationnel : `lib/db/store.ts` `read/write` → table `<prefix>_kv (key, value jsonb)`. Repli fichier `./data` si Supabase n'est pas configuré. Clés : `products`, `orders`, `customers`, `users`, `gateways`, `pixels`, `categories`, `pending_*`, `lock_*`.
 - **Actions serveur** : `lib/actions/{products,orders,categories,settings,pixels,auth,analytics,checkout}.ts`.
 - **Analytics** : tables `<prefix>_visits` et `<prefix>_visitors` (vrai schéma SQL, pas du KV) + présence temps réel Supabase. Schéma versionné dans `supabase/schema.sql` (RLS activée, **aucune policy** : seule la clé service role accède aux données — ajouter une policy de lecture publique exposerait les commandes et les clients).
@@ -74,12 +77,33 @@ C'est le vrai risque du « copie tel site » : une vitrine refaite de zéro a l'
 
 ## 4. Paiements — les deux règles non négociables
 
-Le hub gère 9 passerelles ; **3 sont réellement câblées** : Stripe (Payment Element), Square (Web Payments SDK), Fondy (checkout embarqué). Les autres (Zen, Viva, myPOS, Whop, Airwallex) n'ont que leurs champs de configuration.
+Le hub gère 10 passerelles ; **5 sont réellement câblées** : Stripe (Payment Element), Square (Web Payments SDK), Fondy (checkout embarqué), **Airwallex** (Card Element embarqué) et **Genome** (page hébergée, redirection). Les autres (Zen, Viva, myPOS, Whop) n'ont que leurs champs de configuration. ⚠️ Airwallex et Genome sont câblés et testés techniquement mais **aucun paiement réel n'y est jamais passé** — à valider en sandbox avant le live.
+
+### 4.1 Le tunnel ne connaît AUCUN PSP — comment en brancher un
+`components/shop/CheckoutClient.tsx` ne contient aucun `if (stripe)… if (square)…`. Il demande au registre `components/shop/payment/registry.tsx` si le PSP actif sait encaisser **sur place** ; sinon il redirige. **Brancher un PSP embarqué = 3 gestes, sans toucher au tunnel** :
+1. `lib/payments/public-config.ts` → les clés **publiques** envoyées au navigateur (jamais un secret) ;
+2. `registry.tsx` → une entrée `Fields` + un `confirm(ctx) → { orderId | error | handled }` (`handled` = le PSP a pris la main sur la navigation, cas Fondy/3-DS : **ne pas vider le panier**) ;
+3. une action serveur qui encaisse.
+
+Le mode est **déduit** : config publique exploitable → `embedded`, sinon → `redirect`. Clés incomplètes = redirection propre, jamais un widget mort. `hostedFallback: true` (Fondy) indique que `startCheckout` sait basculer sur la page hébergée ; sans lui, un widget en échec affiche « Paiement indisponible » plutôt qu'une redirection qui n'aboutirait pas.
+
+⚠️ **N'inscrire au registre que des PSP dont les champs carte sont hébergés par eux** (iframe/SDK). Un PSP dont la carte transiterait par nos serveurs ferait basculer la boutique en **PCI DSS SAQ-D** (audit annuel, scans trimestriels). C'est pourquoi **Genome reste en redirection** : sa page hébergée n'est pas embarquable, son SDK sans redirection est **mobile**, et son mode Host-to-Host exige que la carte passe par le marchand.
+
+### 4.2 Airwallex — les deux pièges
+- ⚠️ **Airwallex compte en unités MAJEURES** (`"amount": 100` = 100 €) alors que la boutique compte en **centimes**. `toMajorUnits()` fait la conversion : s'en écarter facturerait 100 × le prix.
+- ⚠️ `createElement` s'importe **du module** `@airwallex/components-sdk`, il n'est pas sur le retour de `init()`. On utilise le **Card Element** (pas le Drop-in, qui apporte son propre bouton alors que le tunnel n'en a qu'un).
+- L'événement de succès vient du navigateur : `finalizeAirwallexPayment` **relit l'intent** chez Airwallex (`SUCCEEDED` + montant identique) avant de créer la commande.
+
+### 4.3 Genome — la signature est la seule preuve
+- ⚠️ **Aucune API de statut** sur la page hébergée : impossible de revérifier un paiement après coup. Le **callback signé est la seule preuve d'encaissement** — `finalizeGenomePayment` ne doit jamais être appelé sans `genomeVerifyCallback`.
+- ⚠️ **L'URL du callback ne se transmet pas dans la requête** : elle se déclare dans le tableau de bord Genome (`https://<domaine>/api/webhooks/genome`). Mettre le domaine **avec `www`** si le domaine nu redirige en 308 : rien ne garantit qu'un PSP suive une redirection sur un POST.
+- JWT signé en HS256 avec le **SHA-256 en octets bruts** du secret (pas son hexadécimal).
 
 - 🔒 **Une commande = un paiement.** Chaque PSP annonce un paiement **deux fois** : le navigateur qui revient, et le webhook serveur — à quelques millisecondes d'écart. Le motif « lire → tester `done` → créer → écrire » **ne suffit pas** : les deux passent le test et créent chacun une commande. C'est arrivé en production. Toute finalisation passe donc par `createOrderOnce()` (`lib/payments/finalize.ts`), qui s'appuie sur l'unicité de clé primaire Postgres (`acquireLock`). **Ne jamais créer une commande hors de ce passage.**
 - 🔢 **Numérotation = plus grand numéro attribué + 1**, jamais « nombre de commandes + 1 » : le compte rejoue un numéro après chaque suppression. Deux commandes ont ainsi porté le même identifiant, dont l'une inaccessible et impossible à supprimer séparément.
 - **3-D Secure actif sur les trois PSP**, sans quitter le site : modale Stripe · modale ACS du widget Fondy · `payments.verifyBuyer()` chez Square. Si le défi échoue ou est abandonné, **on n'encaisse pas** — c'est voulu.
-- ⚠️ **Ordre des passerelles** : `firstEnabledGateway` prend la **première activée** dans `brand.payments`. Si « Test » est activé, il passe avant toutes les autres et **tous les paiements sont simulés**.
+- ✅ **Une seule passerelle active à la fois** (`saveGateway`) : en activer une éteint automatiquement les autres. L'ordre de `brand.payments` ne décide donc plus de rien — l'ancien piège « Test activé passe avant tout le monde » n'existe plus.
+- ✅ **Activation refusée si des clés manquent.** Sans repli possible (une seule passerelle), activer un PSP mal configuré coupe les ventes en silence : le client ne le découvre qu'au clic sur « Payer », avec un message « Clés … manquantes ». **C'est arrivé deux fois en production sur AURA.** `saveGateway` renvoie désormais `{ ok:false, error }` et la carte réaffiche l'interrupteur éteint. ⚠️ **Ne protège que les nouvelles activations** : une passerelle déjà active en base le reste.
 - ⚠️ **Clés test/live partagées** : `credentials` est un dictionnaire unique, mêmes noms de champs dans les deux onglets. Les clés live **écrasent** les clés test, et un champ laissé vide **conserve l'ancienne valeur** → oublier le secret de webhook live laisse celui de test et fait rejeter toutes les signatures. Remplir les champs d'un bloc.
 - ❌ **Stripe Embedded Checkout : essayé, refusé, ne pas y revenir.** Il impose un tunnel en deux étapes.
 
@@ -145,3 +169,5 @@ Les conflits se limitent en principe à la peau (`config/*`, vitrine, catalogue)
 - `seedOrders` et `seedCustomers` **volontairement vides** : une boutique neuve ne doit pas afficher de fausses commandes ni un faux chiffre d'affaires.
 - Le formulaire newsletter de la page d'accueil **n'est pas branché**.
 - Non implémentés, à décider par boutique : consentement cookies, favicon/image de partage, PSP restants.
+- **Remontées d'AURA (août 2026), vérifiées en local sur ce modèle** : produits masquables · uploader d'images glisser-déposer · galerie produit multi-photos · tunnel de paiement générique (registre) · Airwallex embarqué · Genome en redirection · une seule passerelle active à la fois + refus d'activation sans clés.
+- ⚠️ **Panier non revalidé côté serveur au paiement** : `startCheckout` fait confiance aux prix et aux articles envoyés par le navigateur. Un client peut modifier le total avant l'envoi, et un produit masqué déjà au panier reste commandable. Les PSP embarqués recomparent le montant encaissé au montant figé, ce qui limite la casse, mais **la vraie correction est de recalculer le panier depuis le catalogue serveur** — à faire.

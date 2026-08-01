@@ -3,6 +3,7 @@
 /out
 /build
 /data
+/public/uploads
 .DS_Store
 *.pem
 .env

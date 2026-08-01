@@ -170,14 +170,37 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProvider> = {
       ],
     },
   },
+  genome: {
+    id: "genome",
+    name: "Genome",
+    integration: "hosted-checkout",
+    pciScope: "SAQ-A",
+    description:
+      "Page de paiement hébergée (HPP) : redirection vers pay.genome.eu avec un jeton JWT signé, puis confirmation par callback serveur signé. ⚠️ L'URL du callback ne se transmet pas dans la requête — elle se déclare dans le tableau de bord Genome : /api/webhooks/genome. Les tests se font avec la devise XTS sur un compte de test.",
+    docsUrl: "https://developers.genome.eu/merchant/hosted-payment-page/",
+    webhookSigned: true,
+    functional: true,
+    fields: {
+      test: [
+        { key: "apiKey", label: "Clé API (test)", hint: "identifiant `iss` du jeton" },
+        { key: "apiSecret", label: "Secret API (test)", secret: true },
+      ],
+      live: [
+        { key: "apiKey", label: "Clé API (live)", hint: "identifiant `iss` du jeton" },
+        { key: "apiSecret", label: "Secret API (live)", secret: true },
+      ],
+    },
+  },
   airwallex: {
     id: "airwallex",
     name: "Airwallex",
     integration: "hosted-elements",
     pciScope: "SAQ-A",
-    description: "Airwallex Drop-in / Embedded Elements. Intent côté serveur.",
-    docsUrl: "https://www.airwallex.com/docs/payments",
+    description:
+      "Card Element embarqué : champs carte affichés sur le site, 3-D Secure en surcouche, aucune redirection. Le PaymentIntent est créé côté serveur et le paiement est revérifié auprès d'Airwallex avant d'enregistrer la commande.",
+    docsUrl: "https://www.airwallex.com/docs/payments__embedded-elements__card-element",
     webhookSigned: true,
+    functional: true,
     fields: {
       test: [
         { key: "clientId", label: "Client ID" },

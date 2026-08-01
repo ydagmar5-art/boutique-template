@@ -23,6 +23,8 @@ export interface Product {
   featured?: boolean;
   /** Si true : le stock est suivi et affiché au client. Sinon, stock masqué et illimité. */
   manageStock?: boolean;
+  /** Si true : le produit est retiré de la boutique (listes + fiche en 404). Absent = visible. */
+  hidden?: boolean;
 }
 
 /**
