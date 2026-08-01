@@ -3,6 +3,7 @@
 import { brand } from "@/config/brand.config";
 import { paySquare } from "@/lib/actions/checkout";
 import type { CheckoutDraft } from "@/lib/actions/checkout";
+import type { OrderItem } from "@/lib/db/seed";
 import SquareCard from "@/components/shop/SquareCard";
 import StripeCard from "@/components/shop/StripeCard";
 import FondyCard from "@/components/shop/FondyCard";
@@ -61,7 +62,13 @@ export type ConfirmFn = (ctx: PayContext) => Promise<PayResult>;
 export interface FieldsProps {
   /** Clés publiques du PSP (cf. `lib/payments/public-config.ts`). */
   config: Record<string, string | boolean>;
+  /** Montant en CENTIMES — pour l'AFFICHAGE uniquement. */
   amount: number;
+  /**
+   * Lignes du panier. C'est ce qu'on envoie au serveur pour qu'il recalcule le
+   * montant à débiter : un total venu du navigateur ne fait jamais foi.
+   */
+  items: OrderItem[];
   /** À appeler dès que le PSP est prêt à encaisser. */
   onReady: (confirm: ConfirmFn) => void;
   /** À appeler si le widget ne peut pas se charger → repli en redirection. */
@@ -128,9 +135,9 @@ export const EMBEDDED_PSP: Record<string, EmbeddedPsp> = {
 
   airwallex: {
     framed: true,
-    Fields: ({ amount, onReady, onUnavailable }) => (
+    Fields: ({ items, onReady, onUnavailable }) => (
       <AirwallexCard
-        amount={amount}
+        items={items}
         onUnavailable={onUnavailable}
         onReady={(confirm) => onReady((ctx) => confirm(ctx.draft))}
       />
@@ -140,10 +147,10 @@ export const EMBEDDED_PSP: Record<string, EmbeddedPsp> = {
   fondy: {
     framed: true,
     hostedFallback: true,
-    Fields: ({ config, amount, onReady, onUnavailable }) => (
+    Fields: ({ config, items, onReady, onUnavailable }) => (
       <FondyCard
         merchantId={String(config.merchantId)}
-        amount={amount}
+        items={items}
         onUnavailable={onUnavailable}
         onReady={(confirm) =>
           onReady(async (ctx) => {

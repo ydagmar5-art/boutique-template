@@ -8,6 +8,9 @@ export type OrderStatus =
 export interface OrderItem {
   slug: string;
   name: string;
+  /** Identifiant de la variante — sert à retrouver son prix côté serveur.
+   *  Optionnel : les commandes enregistrées avant août 2026 n'en ont pas. */
+  variantId?: string;
   variantLabel: string;
   unitPrice: number; // centimes
   qty: number;

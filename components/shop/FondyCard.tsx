@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { OrderItem } from "@/lib/db/seed";
 import {
   createFondyToken,
   saveFondyDraft,
@@ -109,18 +110,25 @@ function widgetState(app: any): any {
  */
 export default function FondyCard({
   merchantId,
-  amount,
+  items,
   onReady,
   onUnavailable,
 }: {
   merchantId: string;
-  amount: number;
+  /** Lignes du panier : le serveur en déduit le montant figé dans le jeton. */
+  items: OrderItem[];
   onReady: (confirm: FondyConfirm) => void;
   onUnavailable: (reason: string) => void;
 }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const appRef = useRef<any>(null);
   const orderRef = useRef("");
+  /** Signature stable du panier — voir les dépendances de l'effet plus bas. */
+  const cartKey = items
+    .map((i) => `${i.slug}:${i.variantId ?? i.variantLabel}:${i.qty}`)
+    .join("|");
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const resolveRef = useRef<((r: { error?: string }) => void) | null>(null);
 
   const confirm = useCallback<FondyConfirm>(async (draft) => {
@@ -155,7 +163,7 @@ export default function FondyCard({
     (async () => {
       setStatus("loading");
       try {
-        const res = await createFondyToken(amount);
+        const res = await createFondyToken(itemsRef.current);
         if (cancelled) return;
         if (res.error || !res.token || !res.orderId) {
           throw new Error(res.error ?? "Fondy indisponible.");
@@ -231,8 +239,11 @@ export default function FondyCard({
       }
       appRef.current = null;
     };
+    // `items` est un nouveau tableau à chaque rendu : le mettre en dépendance
+    // remonterait le widget (et créerait un jeton) à chaque frappe clavier.
+    // On ne réagit qu'à un vrai changement de panier, via sa signature.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, merchantId]);
+  }, [cartKey, merchantId]);
 
   return (
     <div>

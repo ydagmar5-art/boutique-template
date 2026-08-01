@@ -75,7 +75,7 @@ C'est le vrai risque du « copie tel site » : une vitrine refaite de zéro a l'
 
 ---
 
-## 4. Paiements — les deux règles non négociables
+## 4. Paiements — les trois règles non négociables
 
 Le hub gère 10 passerelles ; **5 sont réellement câblées** : Stripe (Payment Element), Square (Web Payments SDK), Fondy (checkout embarqué), **Airwallex** (Card Element embarqué) et **Genome** (page hébergée, redirection). Les autres (Zen, Viva, myPOS, Whop) n'ont que leurs champs de configuration. ⚠️ Airwallex et Genome sont câblés et testés techniquement mais **aucun paiement réel n'y est jamais passé** — à valider en sandbox avant le live.
 
@@ -99,6 +99,7 @@ Le mode est **déduit** : config publique exploitable → `embedded`, sinon → 
 - ⚠️ **L'URL du callback ne se transmet pas dans la requête** : elle se déclare dans le tableau de bord Genome (`https://<domaine>/api/webhooks/genome`). Mettre le domaine **avec `www`** si le domaine nu redirige en 308 : rien ne garantit qu'un PSP suive une redirection sur un POST.
 - JWT signé en HS256 avec le **SHA-256 en octets bruts** du secret (pas son hexadécimal).
 
+- 💰 **Le panier du navigateur n'est qu'une demande.** Les lignes vivent dans le `localStorage` : prix unitaires et total s'y éditent en trois clics. Toute action qui encaisse passe donc par `validateCart()` (`lib/payments/cart.ts`), qui **relit le catalogue** et ne garde du client que le slug, la variante et la quantité — le nom, le prix et le total sont recalculés. Cela bloque aussi les produits masqués ou en rupture restés au panier. ⚠️ Les créations de jeton/intent (`createFondyToken`, `createAirwallexIntent`) prennent les **lignes**, jamais un montant : un montant reçu du navigateur serait figé tel quel dans le jeton signé. Vérifié en local : panier trafiqué à 2,00 € → commande enregistrée à 318,00 €.
 - 🔒 **Une commande = un paiement.** Chaque PSP annonce un paiement **deux fois** : le navigateur qui revient, et le webhook serveur — à quelques millisecondes d'écart. Le motif « lire → tester `done` → créer → écrire » **ne suffit pas** : les deux passent le test et créent chacun une commande. C'est arrivé en production. Toute finalisation passe donc par `createOrderOnce()` (`lib/payments/finalize.ts`), qui s'appuie sur l'unicité de clé primaire Postgres (`acquireLock`). **Ne jamais créer une commande hors de ce passage.**
 - 🔢 **Numérotation = plus grand numéro attribué + 1**, jamais « nombre de commandes + 1 » : le compte rejoue un numéro après chaque suppression. Deux commandes ont ainsi porté le même identifiant, dont l'une inaccessible et impossible à supprimer séparément.
 - **3-D Secure actif sur les trois PSP**, sans quitter le site : modale Stripe · modale ACS du widget Fondy · `payments.verifyBuyer()` chez Square. Si le défi échoue ou est abandonné, **on n'encaisse pas** — c'est voulu.

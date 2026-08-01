@@ -26,6 +26,7 @@ import {
   type GenomeCallback,
 } from "@/lib/payments/genome";
 import { createOrderOnce } from "@/lib/payments/finalize";
+import { serverTotal, validateCart } from "@/lib/payments/cart";
 import { createOrder } from "@/lib/actions/orders";
 import { read, write } from "@/lib/db/store";
 import { sendPaymentRefused } from "@/lib/emails";
@@ -54,11 +55,30 @@ async function origin(): Promise<string> {
  * hébergés). Stripe et Square s'encaissent sur place, via leurs propres
  * actions (`createStripeIntent` / `paySquare`).
  */
-export async function startCheckout(
+/**
+ * Reconstruit un brouillon avec les prix du CATALOGUE.
+ *
+ * Passage obligé de toute action qui encaisse : le panier arrive du
+ * `localStorage` du client, donc son total et ses prix unitaires ne valent
+ * rien tant qu'ils n'ont pas été recalculés ici (cf. `lib/payments/cart.ts`).
+ */
+async function secureDraft(
   draft: CheckoutDraft,
+): Promise<{ draft?: CheckoutDraft; error?: string }> {
+  const { cart, error } = await validateCart(draft.items);
+  if (error || !cart) return { error: error ?? "Panier invalide." };
+  return { draft: { ...draft, items: cart.items, total: cart.total } };
+}
+
+export async function startCheckout(
+  input: CheckoutDraft,
 ): Promise<{ url?: string; error?: string }> {
   const active = await firstEnabledGateway(brand.payments);
   if (!active) return { error: "Aucun moyen de paiement n'est activé." };
+
+  const checked = await secureDraft(input);
+  if (checked.error || !checked.draft) return { error: checked.error };
+  const draft = checked.draft;
 
   // ── Processeur de test : validation immédiate ──
   if (active.id === "test") {
@@ -225,17 +245,22 @@ interface FondyPending {
 /**
  * Prépare un paiement Fondy EMBARQUÉ : renvoie le jeton attendu par le widget
  * checkout.js. Appelé au montage du formulaire, donc avant que le client ait
- * saisi ses coordonnées — seul le montant est nécessaire ici, le brouillon de
- * commande est enregistré juste avant l'encaissement (`saveFondyDraft`).
+ * saisi ses coordonnées — on ne reçoit que le panier, le brouillon de commande
+ * est enregistré juste avant l'encaissement (`saveFondyDraft`).
+ *
+ * ⚠️ Prend les LIGNES du panier, pas un montant : un montant envoyé par le
+ * navigateur se choisit librement, et il serait ici figé dans le jeton signé.
  */
 export async function createFondyToken(
-  amount: number,
+  items: OrderItem[],
 ): Promise<{ token?: string; orderId?: string; error?: string }> {
   const cfg = await getGatewayConfig("fondy");
   if (!cfg?.enabled) return { error: "Fondy n'est pas activé." };
   const creds = fondyCreds(cfg.credentials);
   if (!creds) return { error: "Clés Fondy manquantes (Merchant ID / mot de passe)." };
-  if (!Number.isInteger(amount) || amount <= 0) return { error: "Montant invalide." };
+
+  const { total: amount, error: cartError } = await serverTotal(items);
+  if (cartError || !amount) return { error: cartError ?? "Panier invalide." };
 
   const orderId = newFondyOrderId();
   const base = await fondyOrigin();
@@ -265,14 +290,19 @@ export async function createFondyToken(
  */
 export async function saveFondyDraft(
   orderId: string,
-  draft: CheckoutDraft,
+  input: CheckoutDraft,
 ): Promise<{ ok?: true; error?: string }> {
   const pending = await read<FondyPending | null>(fondyKey(orderId), null);
   if (!pending) return { error: "Session de paiement expirée, rechargez la page." };
   if (pending.done) return { error: "Ce paiement a déjà été traité." };
-  if (draft.total !== pending.amount)
+
+  const checked = await secureDraft(input);
+  if (checked.error || !checked.draft) return { error: checked.error };
+  // Le total recalculé doit correspondre à celui figé dans le jeton Fondy.
+  if (checked.draft.total !== pending.amount)
     return { error: "Le montant du panier a changé, rechargez la page." };
-  await write(fondyKey(orderId), { ...pending, draft });
+
+  await write(fondyKey(orderId), { ...pending, draft: checked.draft });
   return { ok: true };
 }
 
@@ -346,10 +376,13 @@ interface AirwallexPending {
 
 /**
  * Prépare un paiement Airwallex EMBARQUÉ : crée le PaymentIntent et renvoie au
- * navigateur de quoi monter le Drop-in. Appelé au montage du formulaire, donc
- * avant que le client ait saisi ses coordonnées — seul le montant compte ici.
+ * navigateur de quoi monter les champs carte. Appelé au montage du formulaire,
+ * donc avant que le client ait saisi ses coordonnées.
+ *
+ * ⚠️ Prend les LIGNES du panier, pas un montant : c'est ce montant qui sera
+ * débité, il ne peut pas venir du navigateur.
  */
-export async function createAirwallexIntent(amount: number): Promise<{
+export async function createAirwallexIntent(items: OrderItem[]): Promise<{
   intentId?: string;
   clientSecret?: string;
   env?: "demo" | "prod";
@@ -360,7 +393,9 @@ export async function createAirwallexIntent(amount: number): Promise<{
   if (!cfg?.enabled) return { error: "Airwallex n'est pas activé." };
   const creds = airwallexCreds(cfg.credentials);
   if (!creds) return { error: "Clés Airwallex manquantes (Client ID / clé API)." };
-  if (!Number.isInteger(amount) || amount <= 0) return { error: "Montant invalide." };
+
+  const { total: amount, error: cartError } = await serverTotal(items);
+  if (cartError || !amount) return { error: cartError ?? "Panier invalide." };
 
   const live = cfg.mode === "live";
   const { intent, error } = await airwallexCreateIntent(creds, live, {
@@ -531,7 +566,7 @@ export async function awaitGenomeOrder(
  * Encaisse un paiement Square EMBARQUÉ (Web Payments SDK) : la carte est
  * tokenisée côté client (iframe Square), on ne reçoit qu'un token à débiter.
  */
-export async function paySquare(input: {
+export async function paySquare(request: {
   token: string;
   /** Preuve d'authentification forte (3-D Secure) produite par `verifyBuyer`. */
   verificationToken?: string;
@@ -539,6 +574,11 @@ export async function paySquare(input: {
 }): Promise<{ orderId?: string; error?: string }> {
   const cfg = await getGatewayConfig("square");
   if (!cfg?.enabled) return { error: "Square n'est pas activé." };
+
+  // Le débit se fait sur le total du catalogue, pas sur celui du navigateur.
+  const checked = await secureDraft(request.draft);
+  if (checked.error || !checked.draft) return { error: checked.error };
+  const input = { ...request, draft: checked.draft };
   const accessToken = cfg.credentials.accessToken;
   const locationId = cfg.credentials.locationId;
   if (!accessToken || !locationId)
@@ -600,12 +640,17 @@ export async function paySquare(input: {
  * commande est mis de côté ; la commande n'est créée qu'après confirmation.
  */
 export async function createStripeIntent(
-  draft: CheckoutDraft,
+  input: CheckoutDraft,
 ): Promise<{ clientSecret?: string; error?: string }> {
   const cfg = await getGatewayConfig("stripe");
   if (!cfg?.enabled) return { error: "Stripe n'est pas activé." };
   const secret = cfg.credentials.secretKey;
   if (!secret) return { error: "Clé secrète Stripe manquante (back-office)." };
+
+  // Le montant débité vient du catalogue, jamais du total envoyé par le client.
+  const checked = await secureDraft(input);
+  if (checked.error || !checked.draft) return { error: checked.error };
+  const draft = checked.draft;
 
   try {
     const stripe = new Stripe(secret);

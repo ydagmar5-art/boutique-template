@@ -6,6 +6,7 @@ import {
   finalizeAirwallexPayment,
 } from "@/lib/actions/checkout";
 import type { CheckoutDraft } from "@/lib/actions/checkout";
+import type { OrderItem } from "@/lib/db/seed";
 
 export type AirwallexConfirm = (
   draft: CheckoutDraft,
@@ -29,12 +30,12 @@ type CardElement = Awaited<
  * API, elles, ne quittent jamais le serveur.
  */
 export default function AirwallexCard({
-  amount,
+  items,
   onReady,
   onUnavailable,
 }: {
-  /** Montant en CENTIMES. */
-  amount: number;
+  /** Lignes du panier : le serveur en déduit le montant à débiter. */
+  items: OrderItem[];
   onReady: (confirm: AirwallexConfirm) => void;
   onUnavailable: (reason: string) => void;
 }) {
@@ -46,7 +47,7 @@ export default function AirwallexCard({
     let card: CardElement | null = null;
 
     (async () => {
-      const intent = await createAirwallexIntent(amount);
+      const intent = await createAirwallexIntent(items);
       if (cancelled) return;
       if (intent.error || !intent.intentId || !intent.clientSecret) {
         onUnavailable(intent.error ?? "Airwallex indisponible.");

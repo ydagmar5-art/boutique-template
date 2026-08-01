@@ -8,6 +8,7 @@ import { useCart, cartTotal } from "@/lib/cart/store";
 import { formatPrice } from "@/lib/products";
 import { startCheckout } from "@/lib/actions/checkout";
 import { embeddedPsp, type ConfirmFn } from "@/components/shop/payment/registry";
+import type { OrderItem } from "@/lib/db/seed";
 import PaymentBadges from "@/components/site/PaymentBadges";
 
 /**
@@ -48,18 +49,26 @@ export default function CheckoutClient({
    *  redirection qui n'aboutirait pas. */
   const deadEnd = widgetDown && !entry?.hostedFallback;
 
+  /**
+   * Lignes envoyées au serveur. `variantId` est indispensable : c'est par lui
+   * que le serveur retrouve la variante pour en recalculer le prix — le prix
+   * unitaire ci-dessous, lui, ne sert qu'à l'affichage et sera écrasé.
+   */
+  const cartItems: OrderItem[] = lines.map((l) => ({
+    slug: l.slug,
+    name: l.name,
+    variantId: l.variantId,
+    variantLabel: l.variantLabel,
+    unitPrice: l.unitPrice,
+    qty: l.qty,
+  }));
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!payment) return;
     setError("");
     const fd = new FormData(e.currentTarget);
-    const items = lines.map((l) => ({
-      slug: l.slug,
-      name: l.name,
-      variantLabel: l.variantLabel,
-      unitPrice: l.unitPrice,
-      qty: l.qty,
-    }));
+    const items = cartItems;
     const draft = {
       customer: `${fd.get("firstName")} ${fd.get("lastName")}`.trim(),
       email: String(fd.get("email") || ""),
@@ -188,6 +197,7 @@ export default function CheckoutClient({
                   <psp.Fields
                     config={payment.config}
                     amount={total}
+                    items={cartItems}
                     onReady={(fn) => {
                       confirm.current = fn;
                     }}
@@ -198,6 +208,7 @@ export default function CheckoutClient({
                 <psp.Fields
                   config={payment.config}
                   amount={total}
+                  items={cartItems}
                   onReady={(fn) => {
                     confirm.current = fn;
                   }}
