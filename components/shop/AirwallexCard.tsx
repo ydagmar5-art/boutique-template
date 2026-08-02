@@ -31,11 +31,14 @@ type CardElement = Awaited<
  */
 export default function AirwallexCard({
   items,
+  promoCode,
   onReady,
   onUnavailable,
 }: {
   /** Lignes du panier : le serveur en déduit le montant à débiter. */
   items: OrderItem[];
+  /** Code promo appliqué : il change le montant à figer. */
+  promoCode?: string;
   onReady: (confirm: AirwallexConfirm) => void;
   onUnavailable: (reason: string) => void;
 }) {
@@ -47,7 +50,7 @@ export default function AirwallexCard({
     let card: CardElement | null = null;
 
     (async () => {
-      const intent = await createAirwallexIntent(items);
+      const intent = await createAirwallexIntent(items, promoCode);
       if (cancelled) return;
       if (intent.error || !intent.intentId || !intent.clientSecret) {
         onUnavailable(intent.error ?? "Airwallex indisponible.");
@@ -93,7 +96,9 @@ export default function AirwallexCard({
     // Le montant est figé à l'ouverture du checkout : le remonter à chaque
     // rendu créerait un PaymentIntent par frappe clavier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Le PaymentIntent fige le montant : appliquer un code promo doit en créer
+    // un nouveau, sinon le client paierait le prix non remisé.
+  }, [promoCode]);
 
   return (
     <div>

@@ -39,6 +39,10 @@ export interface Order {
    * N'affecte NI les statistiques NI le chiffre d'affaires.
    */
   archived?: boolean;
+  /** Total avant remise, présent seulement si une offre s'est appliquée. */
+  subtotal?: number;
+  /** Offre automatique et/ou code promo retenus sur cette commande. */
+  discounts?: { promoId: string; label: string; amount: number; code?: string }[];
 }
 
 export interface Customer {

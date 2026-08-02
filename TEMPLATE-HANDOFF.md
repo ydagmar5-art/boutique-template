@@ -75,6 +75,17 @@ C'est le vrai risque du « copie tel site » : une vitrine refaite de zéro a l'
 
 ---
 
+## 3 bis. Offres & codes promo
+
+Une **seule** entité (`lib/promotions.ts`, `Promotion`) couvre les deux besoins : sans `code` elle s'applique toute seule, avec un `code` le client doit le saisir au paiement. Mécaniques : `bogo` (X achetés / Y offerts ou remisés), `percent`, `amount` — ciblables sur tout le catalogue, une catégorie ou des produits choisis, avec panier minimum, dates et quota.
+
+- 🔒 **Le calcul se fait dans `validateCart()`**, jamais côté navigateur : une remise calculée sur un panier non vérifié se contourne aussi facilement qu'un prix falsifié (cf. §4).
+- **Arbitrage produit** : une seule offre AUTOMATIQUE s'applique — la plus avantageuse pour le client ; un code promo se **cumule** par-dessus et porte sur le total déjà remisé.
+- Dans un `bogo`, ce sont les articles **les moins chers** qui sont offerts (usage du commerce, et seule lecture qui ne fasse pas perdre d'argent).
+- ⚠️ Le quota (`usageCount`) se décompte dans `createOrder`, donc **derrière le verrou** `createOrderOnce` — jamais à l'affichage du panier, qu'un simple rechargement épuiserait.
+- ⚠️ Les PSP qui figent un montant à l'avance (Fondy, Airwallex) reçoivent le code promo : sans lui leur jeton porterait le prix non remisé. Leur widget est remonté quand le code change.
+- Le moteur est couvert par 23 cas de test (BOGO, prix mixtes, cumul, quota, dates, plancher à 0).
+
 ## 4. Paiements — les trois règles non négociables
 
 Le hub gère 10 passerelles ; **5 sont réellement câblées** : Stripe (Payment Element), Square (Web Payments SDK), Fondy (checkout embarqué), **Airwallex** (Card Element embarqué) et **Genome** (page hébergée, redirection). Les autres (Zen, Viva, myPOS, Whop) n'ont que leurs champs de configuration. ⚠️ Airwallex et Genome sont câblés et testés techniquement mais **aucun paiement réel n'y est jamais passé** — à valider en sandbox avant le live.

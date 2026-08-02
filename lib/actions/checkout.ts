@@ -31,6 +31,7 @@ import { createOrder } from "@/lib/actions/orders";
 import { read, write } from "@/lib/db/store";
 import { sendPaymentRefused } from "@/lib/emails";
 import type { OrderItem } from "@/lib/db/seed";
+import type { AppliedDiscount } from "@/lib/promotions";
 
 export interface CheckoutDraft {
   customer: string;
@@ -38,6 +39,12 @@ export interface CheckoutDraft {
   address?: string;
   items: OrderItem[];
   total: number;
+  /** Code promo saisi par le client. Sa validité est jugée côté serveur. */
+  promoCode?: string;
+  /** Remises retenues par le serveur — jamais renseigné par le navigateur. */
+  discounts?: AppliedDiscount[];
+  /** Total avant remise. */
+  subtotal?: number;
 }
 
 async function origin(): Promise<string> {
@@ -65,9 +72,19 @@ async function origin(): Promise<string> {
 async function secureDraft(
   draft: CheckoutDraft,
 ): Promise<{ draft?: CheckoutDraft; error?: string }> {
-  const { cart, error } = await validateCart(draft.items);
+  const { cart, error } = await validateCart(draft.items, draft.promoCode);
   if (error || !cart) return { error: error ?? "Panier invalide." };
-  return { draft: { ...draft, items: cart.items, total: cart.total } };
+  // Un code refusé ne bloque pas la commande : il est simplement ignoré, et le
+  // client l'a déjà vu refusé sur la page (le total affiché est le bon).
+  return {
+    draft: {
+      ...draft,
+      items: cart.items,
+      total: cart.total,
+      subtotal: cart.subtotal,
+      discounts: cart.discounts,
+    },
+  };
 }
 
 export async function startCheckout(
@@ -88,6 +105,8 @@ export async function startCheckout(
       address: draft.address,
       items: draft.items,
       total: draft.total,
+      subtotal: draft.subtotal,
+      discounts: draft.discounts,
       psp: "Test (paiement simulé)",
     });
     return { url: `/order/${id}` };
@@ -253,13 +272,14 @@ interface FondyPending {
  */
 export async function createFondyToken(
   items: OrderItem[],
+  promoCode?: string,
 ): Promise<{ token?: string; orderId?: string; error?: string }> {
   const cfg = await getGatewayConfig("fondy");
   if (!cfg?.enabled) return { error: "Fondy n'est pas activé." };
   const creds = fondyCreds(cfg.credentials);
   if (!creds) return { error: "Clés Fondy manquantes (Merchant ID / mot de passe)." };
 
-  const { total: amount, error: cartError } = await serverTotal(items);
+  const { total: amount, error: cartError } = await serverTotal(items, promoCode);
   if (cartError || !amount) return { error: cartError ?? "Panier invalide." };
 
   const orderId = newFondyOrderId();
@@ -356,6 +376,8 @@ export async function finalizeFondyPayment(
       address: draft.address,
       items: draft.items,
       total: draft.total,
+      subtotal: draft.subtotal,
+      discounts: draft.discounts,
       psp: "Fondy",
     });
     await write(fondyKey(orderId), { ...pending, done: true, orderId: id });
@@ -382,7 +404,10 @@ interface AirwallexPending {
  * ⚠️ Prend les LIGNES du panier, pas un montant : c'est ce montant qui sera
  * débité, il ne peut pas venir du navigateur.
  */
-export async function createAirwallexIntent(items: OrderItem[]): Promise<{
+export async function createAirwallexIntent(
+  items: OrderItem[],
+  promoCode?: string,
+): Promise<{
   intentId?: string;
   clientSecret?: string;
   env?: "demo" | "prod";
@@ -394,7 +419,7 @@ export async function createAirwallexIntent(items: OrderItem[]): Promise<{
   const creds = airwallexCreds(cfg.credentials);
   if (!creds) return { error: "Clés Airwallex manquantes (Client ID / clé API)." };
 
-  const { total: amount, error: cartError } = await serverTotal(items);
+  const { total: amount, error: cartError } = await serverTotal(items, promoCode);
   if (cartError || !amount) return { error: cartError ?? "Panier invalide." };
 
   const live = cfg.mode === "live";
@@ -466,6 +491,8 @@ export async function finalizeAirwallexPayment(input: {
           address: input.draft.address,
           items: input.draft.items,
           total: pending.amount,
+          subtotal: input.draft.subtotal,
+          discounts: input.draft.discounts,
           psp: "Airwallex",
         });
         await write(airwallexKey(input.intentId), {
@@ -537,6 +564,8 @@ export async function finalizeGenomePayment(
       address: pending.draft.address,
       items: pending.draft.items,
       total: pending.draft.total,
+      subtotal: pending.draft.subtotal,
+      discounts: pending.draft.discounts,
       psp: "Genome",
     });
     await write(genomeKey(orderId), { ...pending, done: true, orderId: id });
@@ -623,6 +652,8 @@ export async function paySquare(request: {
       address: input.draft.address,
       items: input.draft.items,
       total: input.draft.total,
+      subtotal: input.draft.subtotal,
+      discounts: input.draft.discounts,
       psp: "Square",
     });
     return { orderId: id };
@@ -711,6 +742,8 @@ export async function finalizeStripePayment(
           address: pending.draft.address,
           items: pending.draft.items,
           total: pending.draft.total,
+          subtotal: pending.draft.subtotal,
+          discounts: pending.draft.discounts,
           psp: "Stripe",
         });
         await write(`pending_${paymentIntentId}`, {

@@ -69,6 +69,9 @@ export interface FieldsProps {
    * montant à débiter : un total venu du navigateur ne fait jamais foi.
    */
   items: OrderItem[];
+  /** Code promo appliqué : les PSP qui figent un montant à l'avance doivent le
+   *  connaître, sinon leur jeton porterait le prix non remisé. */
+  promoCode?: string;
   /** À appeler dès que le PSP est prêt à encaisser. */
   onReady: (confirm: ConfirmFn) => void;
   /** À appeler si le widget ne peut pas se charger → repli en redirection. */
@@ -135,9 +138,10 @@ export const EMBEDDED_PSP: Record<string, EmbeddedPsp> = {
 
   airwallex: {
     framed: true,
-    Fields: ({ items, onReady, onUnavailable }) => (
+    Fields: ({ items, promoCode, onReady, onUnavailable }) => (
       <AirwallexCard
         items={items}
+        promoCode={promoCode}
         onUnavailable={onUnavailable}
         onReady={(confirm) => onReady((ctx) => confirm(ctx.draft))}
       />
@@ -147,10 +151,11 @@ export const EMBEDDED_PSP: Record<string, EmbeddedPsp> = {
   fondy: {
     framed: true,
     hostedFallback: true,
-    Fields: ({ config, items, onReady, onUnavailable }) => (
+    Fields: ({ config, items, promoCode, onReady, onUnavailable }) => (
       <FondyCard
         merchantId={String(config.merchantId)}
         items={items}
+        promoCode={promoCode}
         onUnavailable={onUnavailable}
         onReady={(confirm) =>
           onReady(async (ctx) => {

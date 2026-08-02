@@ -11,6 +11,7 @@ const nav = [
   { label: "Catalogue", href: "/admin/products", icon: "▦" },
   { label: "Catégories", href: "/admin/categories", icon: "▤" },
   { label: "Clients", href: "/admin/customers", icon: "▧" },
+  { label: "Offres & codes promo", href: "/admin/promotions", icon: "◇" },
   { label: "Passerelles de paiement", href: "/admin/payments", icon: "▨" },
   { label: "Pixels & tracking", href: "/admin/pixels", icon: "◈" },
 ];

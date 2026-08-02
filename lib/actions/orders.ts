@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { store } from "@/config/store.config";
+import { countPromotionUse } from "@/lib/actions/promotions";
+import type { AppliedDiscount } from "@/lib/promotions";
 import { read, write } from "@/lib/db/store";
 import {
   type Order,
@@ -44,6 +46,10 @@ export interface NewOrderInput {
   items: OrderItem[];
   total: number;
   psp: string;
+  /** Total avant remise, si une offre s'est appliquée. */
+  subtotal?: number;
+  /** Remises retenues par le serveur (offre automatique et/ou code promo). */
+  discounts?: AppliedDiscount[];
 }
 
 export async function createOrder(input: NewOrderInput): Promise<{ id: string }> {
@@ -72,9 +78,18 @@ export async function createOrder(input: NewOrderInput): Promise<{ id: string }>
     status: "paid",
     psp: input.psp,
     items: input.items,
+    ...(input.discounts?.length
+      ? { subtotal: input.subtotal, discounts: input.discounts }
+      : {}),
   };
   orders.unshift(order);
   await write(ORDERS, orders);
+
+  // Le quota des offres se consomme ICI, une seule fois par commande : cette
+  // fonction est déjà protégée par le verrou `createOrderOnce` côté PSP, alors
+  // qu'un décompte à l'affichage du panier serait épuisé par de simples
+  // rechargements de page.
+  await countPromotionUse((input.discounts ?? []).map((d) => d.promoId));
 
   // Upsert client
   const customers = await read<Customer[]>(CUSTOMERS, NO_CUSTOMERS);

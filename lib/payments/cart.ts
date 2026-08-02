@@ -1,5 +1,7 @@
 import "server-only";
 import { listVisibleProducts } from "@/lib/actions/products";
+import { listPromotions } from "@/lib/actions/promotions";
+import { applyPromotions, type AppliedDiscount, type PromoLine } from "@/lib/promotions";
 import type { OrderItem } from "@/lib/db/seed";
 
 /**
@@ -23,12 +25,20 @@ const MAX_QTY = 99;
 export interface ValidatedCart {
   /** Lignes reconstruites depuis le catalogue (prix serveur). */
   items: OrderItem[];
-  /** Total recalculé, en centimes. */
+  /** Total à payer, remises déduites. En centimes. */
   total: number;
+  /** Somme des articles avant remise. */
+  subtotal: number;
+  /** Remises retenues (offre automatique et/ou code promo). */
+  discounts: AppliedDiscount[];
+  /** Motif du refus du code saisi, à afficher au client. */
+  codeError?: string;
 }
 
 export async function validateCart(
   items: OrderItem[] | undefined,
+  /** Code promo saisi au paiement. */
+  code?: string,
 ): Promise<{ cart?: ValidatedCart; error?: string }> {
   if (!Array.isArray(items) || items.length === 0) {
     return { error: "Votre panier est vide." };
@@ -36,6 +46,8 @@ export async function validateCart(
 
   const catalogue = await listVisibleProducts();
   const clean: OrderItem[] = [];
+  /** Lignes enrichies de leur catégorie, pour le ciblage des offres. */
+  const promoLines: PromoLine[] = [];
 
   for (const line of items) {
     const qty = Number(line?.qty);
@@ -73,28 +85,47 @@ export async function validateCart(
       };
     }
 
+    const unitPrice = product.price + variant.priceDelta;
     clean.push({
       slug: product.slug,
       name: product.name,
       variantId: variant.id,
       variantLabel: variant.label,
-      unitPrice: product.price + variant.priceDelta,
+      unitPrice,
+      qty,
+    });
+    promoLines.push({
+      slug: product.slug,
+      name: product.name,
+      collection: product.collection,
+      unitPrice,
       qty,
     });
   }
 
+  // Les offres sont appliquées ICI, après reconstruction des prix : une remise
+  // calculée sur un panier non vérifié se contournerait aussi facilement qu'un
+  // total falsifié.
+  const totals = applyPromotions(promoLines, await listPromotions(), code);
+
   return {
     cart: {
       items: clean,
-      total: clean.reduce((sum, i) => sum + i.unitPrice * i.qty, 0),
+      subtotal: totals.subtotal,
+      total: totals.total,
+      discounts: [totals.auto, totals.promoCode].filter(
+        (d): d is AppliedDiscount => !!d,
+      ),
+      codeError: totals.codeError,
     },
   };
 }
 
-/** Total du panier recalculé côté serveur, sans reconstruire les lignes. */
+/** Total à débiter, remises comprises. Sans reconstruire les lignes. */
 export async function serverTotal(
   items: OrderItem[] | undefined,
+  code?: string,
 ): Promise<{ total?: number; error?: string }> {
-  const { cart, error } = await validateCart(items);
+  const { cart, error } = await validateCart(items, code);
   return cart ? { total: cart.total } : { error };
 }

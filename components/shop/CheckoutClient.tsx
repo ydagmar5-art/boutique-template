@@ -1,15 +1,25 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { brand } from "@/config/brand.config";
 import { useCart, cartTotal } from "@/lib/cart/store";
 import { formatPrice } from "@/lib/products";
 import { startCheckout } from "@/lib/actions/checkout";
+import { quoteCart } from "@/lib/actions/promotions";
+import type { AppliedDiscount } from "@/lib/promotions";
 import { embeddedPsp, type ConfirmFn } from "@/components/shop/payment/registry";
 import type { OrderItem } from "@/lib/db/seed";
 import PaymentBadges from "@/components/site/PaymentBadges";
+
+/** Récapitulatif chiffré par le serveur (seul juge du montant). */
+interface Quote {
+  subtotal: number;
+  total: number;
+  discounts: AppliedDiscount[];
+  codeError?: string;
+}
 
 /**
  * Le PSP actif, tel que le serveur le décrit. Le checkout ne sait rien de
@@ -37,8 +47,15 @@ export default function CheckoutClient({
   const clear = useCart((s) => s.clear);
   const [pending, start] = useTransition();
   const [error, setError] = useState(initialError);
-  const total = cartTotal(lines);
+  const localTotal = cartTotal(lines);
   const confirm = useRef<ConfirmFn | null>(null);
+  /** Code saisi, puis code réellement appliqué (validé par le serveur). */
+  const [codeInput, setCodeInput] = useState("");
+  const [code, setCode] = useState("");
+  const [quote, setQuote] = useState<Quote | null>(null);
+  /** Le serveur fait foi sur le montant : tant qu'il n'a pas répondu, on
+   *  affiche la somme des articles, sans remise. */
+  const total = quote?.total ?? localTotal;
   // Widget indisponible (script bloqué, clés invalides…) : on bascule sur la
   // page hébergée du PSP plutôt que de laisser le client sans solution.
   const [widgetDown, setWidgetDown] = useState(false);
@@ -63,6 +80,25 @@ export default function CheckoutClient({
     qty: l.qty,
   }));
 
+  /** Signature du panier : évite de réinterroger le serveur à chaque frappe. */
+  const cartKey = lines
+    .map((l) => `${l.slug}:${l.variantId}:${l.qty}`)
+    .join("|");
+
+  useEffect(() => {
+    if (lines.length === 0) return setQuote(null);
+    let cancelled = false;
+    quoteCart(cartItems, code || undefined).then((q) => {
+      if (!cancelled && !q.error) setQuote(q as Quote);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `cartItems` est reconstruit à chaque rendu : on ne réagit qu'à un vrai
+    // changement de panier (via sa signature) ou de code appliqué.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartKey, code]);
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!payment) return;
@@ -75,6 +111,7 @@ export default function CheckoutClient({
       address: `${fd.get("address")}, ${fd.get("zip")} ${fd.get("city")}`,
       items,
       total,
+      promoCode: code || undefined,
     };
 
     start(async () => {
@@ -198,6 +235,7 @@ export default function CheckoutClient({
                     config={payment.config}
                     amount={total}
                     items={cartItems}
+                    promoCode={code || undefined}
                     onReady={(fn) => {
                       confirm.current = fn;
                     }}
@@ -209,6 +247,7 @@ export default function CheckoutClient({
                   config={payment.config}
                   amount={total}
                   items={cartItems}
+                  promoCode={code || undefined}
                   onReady={(fn) => {
                     confirm.current = fn;
                   }}
@@ -282,8 +321,58 @@ export default function CheckoutClient({
               </div>
             ))}
           </div>
+          {/* ── Code promo ── */}
+          <div className="mt-5 border-t border-line pt-5">
+            <div className="flex gap-2">
+              <input
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    setCode(codeInput.trim());
+                  }
+                }}
+                placeholder="Code promo"
+                aria-label="Code promo"
+                className="min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 py-2.5 text-sm uppercase outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={() => setCode(codeInput.trim())}
+                className="shrink-0 rounded-xl border border-line px-4 py-2.5 text-sm text-muted hover:text-ink"
+              >
+                Appliquer
+              </button>
+            </div>
+            {quote?.codeError && (
+              <p className="mt-2 text-xs text-secondary">{quote.codeError}</p>
+            )}
+          </div>
+
           <div className="mt-5 space-y-2 border-t border-line pt-5 text-sm">
-            <Row label="Sous-total" value={formatPrice(total, brand.currency, brand.locale)} />
+            <Row
+              label="Sous-total"
+              value={formatPrice(quote?.subtotal ?? total, brand.currency, brand.locale)}
+            />
+            {quote?.discounts.map((d) => (
+              <div
+                key={d.promoId + (d.code ?? "")}
+                className="flex items-start justify-between gap-3 text-organic"
+              >
+                <span className="min-w-0">
+                  {d.label}
+                  {d.code && (
+                    <span className="ml-1.5 rounded bg-organic/10 px-1.5 py-0.5 font-mono text-[10px]">
+                      {d.code}
+                    </span>
+                  )}
+                </span>
+                <span className="whitespace-nowrap font-medium">
+                  −{formatPrice(d.amount, brand.currency, brand.locale)}
+                </span>
+              </div>
+            ))}
             <div className="flex items-center justify-between text-muted">
               <span>Livraison</span>
               <span className="flex items-center gap-2">

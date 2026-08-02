@@ -111,12 +111,15 @@ function widgetState(app: any): any {
 export default function FondyCard({
   merchantId,
   items,
+  promoCode,
   onReady,
   onUnavailable,
 }: {
   merchantId: string;
   /** Lignes du panier : le serveur en déduit le montant figé dans le jeton. */
   items: OrderItem[];
+  /** Code promo appliqué : il change le montant à figer. */
+  promoCode?: string;
   onReady: (confirm: FondyConfirm) => void;
   onUnavailable: (reason: string) => void;
 }) {
@@ -126,9 +129,11 @@ export default function FondyCard({
   /** Signature stable du panier — voir les dépendances de l'effet plus bas. */
   const cartKey = items
     .map((i) => `${i.slug}:${i.variantId ?? i.variantLabel}:${i.qty}`)
-    .join("|");
+    .join("|") + `#${promoCode ?? ""}`;
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const promoRef = useRef(promoCode);
+  promoRef.current = promoCode;
   const resolveRef = useRef<((r: { error?: string }) => void) | null>(null);
 
   const confirm = useCallback<FondyConfirm>(async (draft) => {
@@ -163,7 +168,7 @@ export default function FondyCard({
     (async () => {
       setStatus("loading");
       try {
-        const res = await createFondyToken(itemsRef.current);
+        const res = await createFondyToken(itemsRef.current, promoRef.current);
         if (cancelled) return;
         if (res.error || !res.token || !res.orderId) {
           throw new Error(res.error ?? "Fondy indisponible.");
@@ -194,7 +199,7 @@ export default function FondyCard({
             lang: "fr",
           },
           messages: { fr: FR },
-          // Accordé à la palette de la marque (config/brand.config.ts).
+          // Palette AURA (Espresso / Lin / Ambre).
           css_variable: {
             text: "#2A2420",
             bg: "#FFFFFF",
