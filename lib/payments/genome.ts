@@ -64,6 +64,12 @@ export interface GenomeCheckoutInput {
   email?: string;
   /** Code langue de la page de paiement (ISO 639-1). */
   lang?: string;
+  /**
+   * Claims `VALUE_*` d'identité (cf. `lib/payments/identity.ts`) : nom,
+   * téléphone, adresse. Pré-remplissent la page hébergée et alimentent le
+   * contrôle du risque de Genome.
+   */
+  identity?: Record<string, string>;
 }
 
 /**
@@ -94,6 +100,12 @@ export function genomeCheckoutUrl(
   };
   if (input.email) claims.VALUE_EMAIL = input.email;
   if (input.lang) claims.VALUE_LANG = input.lang;
+  // Noms de claims relevés dans la documentation marchand (Hosted Payment
+  // Page) : VALUE_FIRST_NAME, VALUE_LAST_NAME, VALUE_PHONE, VALUE_ADDRESS,
+  // VALUE_CITY, VALUE_ZIP, VALUE_COUNTRY. Un claim vide n'est jamais envoyé.
+  for (const [cle, valeur] of Object.entries(input.identity ?? {})) {
+    if (valeur) claims[cle] = valeur;
+  }
 
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = b64url(JSON.stringify(claims));

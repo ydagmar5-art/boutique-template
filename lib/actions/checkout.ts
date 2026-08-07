@@ -14,6 +14,7 @@ import {
 } from "@/lib/payments/fondy";
 import {
   AIRWALLEX_SUCCESS,
+  airwallexAttachIdentity,
   airwallexCreateIntent,
   airwallexCreds,
   airwallexGetIntent,
@@ -25,6 +26,12 @@ import {
   newGenomeOrderId,
   type GenomeCallback,
 } from "@/lib/payments/genome";
+import {
+  airwallexShipping,
+  fondyReservationData,
+  genomeIdentityClaims,
+  stripeShipping,
+} from "@/lib/payments/identity";
 import { createOrderOnce } from "@/lib/payments/finalize";
 import { serverTotal, validateCart } from "@/lib/payments/cart";
 import { createOrder } from "@/lib/actions/orders";
@@ -45,6 +52,25 @@ export interface CheckoutDraft {
   discounts?: AppliedDiscount[];
   /** Total avant remise. */
   subtotal?: number;
+  /** Origine de la visiteuse (cf. `lib/attribution.ts`). */
+  source?: string;
+  /*
+    ── Identité structurée ──────────────────────────────────────────────
+    `customer` et `address` restent la forme LISIBLE (back-office, e-mails).
+    Ces champs-ci sont la forme MACHINE, attendue par les PSP : nom et
+    prénom séparés, rue, code postal et ville distincts, téléphone.
+    Facultatifs par prudence — un brouillon ancien ou un tunnel partiel ne
+    doit pas faire échouer un encaissement (cf. `lib/payments/identity.ts`).
+  */
+  firstName?: string;
+  lastName?: string;
+  /** Téléphone du destinataire — exigé par le livreur, utile à l'anti-fraude. */
+  phone?: string;
+  street?: string;
+  zip?: string;
+  city?: string;
+  /** ISO 3166-1 alpha-2. Absent = France. */
+  country?: string;
 }
 
 async function origin(): Promise<string> {
@@ -108,6 +134,8 @@ export async function startCheckout(
       subtotal: draft.subtotal,
       discounts: draft.discounts,
       psp: "Test (paiement simulé)",
+      phone: draft.phone,
+      source: draft.source,
     });
     return { url: `/order/${id}` };
   }
@@ -191,6 +219,8 @@ export async function startCheckout(
       responseUrl: `${base}/api/fondy/return?o=${encodeURIComponent(orderId)}`,
       serverCallbackUrl: `${base}/api/webhooks/fondy`,
       email: draft.email,
+      // Anti-fraude et dossier de litige (cf. `lib/payments/identity.ts`).
+      reservationData: fondyReservationData(draft),
     });
     if (error || !url) return { error: error ?? "Fondy : initialisation impossible." };
     await write(fondyKey(orderId), {
@@ -224,6 +254,8 @@ export async function startCheckout(
         failureUrl: `${base}/checkout?error=${encodeURIComponent("Le paiement a été refusé.")}`,
         email: draft.email,
         lang: brand.locale.split("-")[0],
+        // Pré-remplit la page hébergée ET alimente son contrôle du risque.
+        identity: genomeIdentityClaims(draft),
       }),
     };
   }
@@ -379,6 +411,9 @@ export async function finalizeFondyPayment(
       subtotal: draft.subtotal,
       discounts: draft.discounts,
       psp: "Fondy",
+      phone: draft.phone,
+      pspRef: status.paymentId || orderId,
+      source: draft.source,
     });
     await write(fondyKey(orderId), { ...pending, done: true, orderId: id });
     return id;
@@ -443,6 +478,32 @@ export async function createAirwallexIntent(
 }
 
 /**
+ * Attache l'identité de la cliente à l'intent, juste avant la confirmation.
+ *
+ * Appelée depuis le formulaire, une fois les coordonnées saisies : l'intent,
+ * lui, a été créé au montage des champs carte, quand on ne savait encore rien
+ * de la cliente.
+ *
+ * ⚠️ Ne renvoie jamais d'erreur bloquante : le paiement passe avant tout.
+ */
+export async function attachAirwallexIdentity(
+  intentId: string,
+  draft: CheckoutDraft,
+): Promise<{ ok: boolean }> {
+  const cfg = await getGatewayConfig("airwallex");
+  const creds = airwallexCreds(cfg?.credentials);
+  if (!cfg?.enabled || !creds) return { ok: false };
+  return airwallexAttachIdentity(creds, cfg.mode === "live", intentId, {
+    shipping: airwallexShipping(draft),
+    email: draft.email || undefined,
+    metadata: {
+      boutique: brand.name,
+      ...(draft.source ? { origine: draft.source } : {}),
+    },
+  });
+}
+
+/**
  * Transforme un paiement Airwallex confirmé en commande.
  *
  * ⚠️ Le succès annoncé par le SDK n'est qu'une information venant du navigateur
@@ -494,6 +555,9 @@ export async function finalizeAirwallexPayment(input: {
           subtotal: input.draft.subtotal,
           discounts: input.draft.discounts,
           psp: "Airwallex",
+          phone: input.draft.phone,
+          pspRef: input.intentId,
+          source: input.draft.source,
         });
         await write(airwallexKey(input.intentId), {
           ...pending,
@@ -567,6 +631,9 @@ export async function finalizeGenomePayment(
       subtotal: pending.draft.subtotal,
       discounts: pending.draft.discounts,
       psp: "Genome",
+      phone: pending.draft.phone,
+      pspRef: String(callback.transaction?.id ?? orderId),
+      source: pending.draft.source,
     });
     await write(genomeKey(orderId), { ...pending, done: true, orderId: id });
     return id;
@@ -655,6 +722,9 @@ export async function paySquare(request: {
       subtotal: input.draft.subtotal,
       discounts: input.draft.discounts,
       psp: "Square",
+      phone: input.draft.phone,
+      pspRef: String(data.payment?.id ?? ""),
+      source: input.draft.source,
     });
     return { orderId: id };
   } catch (e) {
@@ -692,6 +762,17 @@ export async function createStripeIntent(
       automatic_payment_methods: { enabled: true },
       receipt_email: draft.email || undefined,
       description: `Commande ${brand.name}`,
+      /*
+        Identité du destinataire (cf. `lib/payments/identity.ts`).
+        Sans elle, Radar ne peut pas comparer l'adresse de facturation de la
+        carte à l'adresse de livraison — le contrôle anti-fraude le plus
+        discriminant — et un litige « colis non reçu » se défend à la main.
+      */
+      shipping: stripeShipping(draft),
+      metadata: {
+        boutique: brand.name,
+        ...(draft.source ? { origine: draft.source } : {}),
+      },
     });
     await write(`pending_${intent.id}`, { draft, done: false, orderId: null });
     return { clientSecret: intent.client_secret ?? undefined };
@@ -745,6 +826,9 @@ export async function finalizeStripePayment(
           subtotal: pending.draft.subtotal,
           discounts: pending.draft.discounts,
           psp: "Stripe",
+          phone: pending.draft.phone,
+          pspRef: paymentIntentId,
+          source: pending.draft.source,
         });
         await write(`pending_${paymentIntentId}`, {
           ...pending,

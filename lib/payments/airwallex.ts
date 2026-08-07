@@ -150,6 +150,62 @@ export async function airwallexCreateIntent(
 }
 
 /**
+ * Attache l'identité du destinataire à un PaymentIntent DÉJÀ CRÉÉ.
+ *
+ * ⚠️ Pourquoi un second appel plutôt qu'un champ à la création : le Card
+ * Element d'Airwallex exige l'`id` et le `client_secret` de l'intent pour
+ * s'afficher, donc l'intent naît au MONTAGE du formulaire — bien avant que la
+ * cliente ait tapé son nom. L'API d'Airwallex prévoit exactement ce cas :
+ * « update the existing PaymentIntent before the payment is confirmed ».
+ *
+ * ⚠️ NE JAMAIS FAIRE ÉCHOUER LE PAIEMENT ICI. Un refus (champ inattendu,
+ * intent déjà confirmé, réseau) est journalisé et ignoré : la cliente paie,
+ * simplement sans le bonus d'anti-fraude.
+ */
+export async function airwallexAttachIdentity(
+  creds: AirwallexCreds,
+  live: boolean,
+  intentId: string,
+  input: {
+    shipping?: Record<string, unknown>;
+    email?: string;
+    metadata?: Record<string, string>;
+  },
+): Promise<{ ok: boolean }> {
+  if (!input.shipping && !input.metadata) return { ok: false };
+  const { token } = await accessToken(creds, live);
+  if (!token) return { ok: false };
+
+  try {
+    const res = await fetch(
+      `${airwallexApiBase(live)}/api/v1/pa/payment_intents/${encodeURIComponent(intentId)}/update`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          request_id: crypto.randomUUID(),
+          ...(input.shipping ? { order: { shipping: input.shipping } } : {}),
+          ...(input.email ? { customer: { email: input.email } } : {}),
+          ...(input.metadata ? { metadata: input.metadata } : {}),
+        }),
+      },
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.warn("[airwallex] identité non attachée", res.status, detail);
+      return { ok: false };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.warn("[airwallex] identité non attachée", e);
+    return { ok: false };
+  }
+}
+
+/**
  * Relit un PaymentIntent côté serveur.
  *
  * ⚠️ C'est LA vérification qui compte : l'événement `success` du SDK vient du

@@ -65,3 +65,30 @@ export async function deleteProduct(slug: string): Promise<void> {
   revalidatePath("/products");
   revalidatePath("/admin/products");
 }
+
+/**
+ * Range le catalogue dans l'ordre donné (liste de slugs, du 1er au dernier).
+ *
+ * ⚠️ L'ORDRE DU TABLEAU EST L'ORDRE D'AFFICHAGE. Aucun `sort()` n'intervient
+ * entre le stockage et la boutique : c'est ce qui permet au gérant de classer
+ * ses modèles à la main, en les glissant dans le back-office. Ne jamais
+ * introduire de tri automatique (prix, nom, date) sur les listes vitrine —
+ * cela annulerait silencieusement son classement.
+ *
+ * Les slugs inconnus sont ignorés et les produits absents de la liste sont
+ * conservés à la fin : si un produit est créé dans un autre onglet pendant
+ * qu'on glisse une ligne, il ne doit pas disparaître du catalogue.
+ */
+export async function reorderProducts(slugs: string[]): Promise<void> {
+  const products = await listProducts();
+  const rang = new Map(slugs.map((s, i) => [s, i]));
+  const ordonnes = [...products].sort(
+    (a, b) =>
+      (rang.get(a.slug) ?? Number.MAX_SAFE_INTEGER) -
+      (rang.get(b.slug) ?? Number.MAX_SAFE_INTEGER),
+  );
+  await write(KEY, ordonnes);
+  revalidatePath("/");
+  revalidatePath("/products");
+  revalidatePath("/admin/products");
+}

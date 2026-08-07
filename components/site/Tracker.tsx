@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { trackVisit } from "@/lib/actions/analytics";
+import { memoriserSource } from "@/lib/cart/store";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { store } from "@/config/store.config";
@@ -61,6 +62,8 @@ export default function Tracker() {
   // À chaque changement de page : enregistre la visite + met à jour la présence.
   useEffect(() => {
     if (pathname.startsWith("/admin")) return;
+    // Avant tout filtrage : l'origine se lit sur la page d'ARRIVÉE.
+    memoriserSource();
     const vid = vidRef.current || getVisitorId();
     trackVisit(pathname, document.referrer || undefined, vid)
       .then((res) => {

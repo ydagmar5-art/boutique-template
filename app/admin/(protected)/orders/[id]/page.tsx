@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { brand } from "@/config/brand.config";
+import { SOURCE_LABEL, type SourceVente } from "@/lib/attribution";
 import { formatPrice } from "@/lib/products";
 import { getOrder } from "@/lib/actions/orders";
 import { statusLabel, STATUS_STYLE } from "@/lib/db/seed";
@@ -114,9 +115,15 @@ export default async function OrderDetail({
           <div className="rounded-2xl border border-line bg-surface p-6">
             <h2 className="mb-3 font-medium">Client</h2>
             <p className="text-sm">{order.customer}</p>
-            <a href={`mailto:${order.email}`} className="text-sm text-primary-dark hover:underline">
+            {/* Cliquable : un appui suffit pour appeler la cliente depuis le téléphone. */}
+            <a href={`mailto:${order.email}`} className="block text-sm text-primary-dark hover:underline">
               {order.email}
             </a>
+            {order.phone && (
+              <a href={`tel:${order.phone.replace(/\s/g, "")}`} className="text-sm text-primary-dark hover:underline">
+                {order.phone}
+              </a>
+            )}
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6">
             <h2 className="mb-3 font-medium">Livraison</h2>
@@ -129,6 +136,19 @@ export default async function OrderDetail({
             <h2 className="mb-3 font-medium">Paiement</h2>
             <p className="text-sm">
               Réglé via <span className="font-medium">{order.psp}</span>
+            </p>
+            {/* Référence chez le PSP : rapproche la commande de l'encaissement,
+                et retrouve la transaction en cas de litige. */}
+            {order.pspRef && (
+              <p className="mt-2 break-all font-mono text-xs text-muted">
+                {order.pspRef}
+              </p>
+            )}
+            <p className="mt-3 border-t border-line pt-3 text-sm text-muted">
+              Origine :{" "}
+              <span className="text-ink">
+                {SOURCE_LABEL[(order.source ?? "direct") as SourceVente] ?? order.source}
+              </span>
             </p>
             <p className="mt-1 text-sm text-muted">
               {formatPrice(order.total, brand.currency, brand.locale)}

@@ -30,6 +30,18 @@ export interface Order {
   total: number; // centimes
   status: OrderStatus;
   psp: string;
+  /** Téléphone du destinataire, pour le livreur. */
+  phone?: string;
+  /**
+   * Référence de la transaction chez le PSP (`pi_…` chez Stripe, `int_…`
+   * chez Airwallex). Sert à rapprocher une commande d'un encaissement et à
+   * lui rattacher le suivi (cf. `lib/payments/tracking.ts`).
+   */
+  pspRef?: string;
+  /** Canal d'acquisition, au PREMIER contact (cf. `lib/attribution.ts`). */
+  source?: string;
+  /** Date ISO à laquelle le suivi a été transmis au PSP, si elle a abouti. */
+  trackingSentAt?: string;
   items: OrderItem[];
   address?: string;
   /** Renseigné au passage en « expédiée » (facultatif). */

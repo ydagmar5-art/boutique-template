@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  attachAirwallexIdentity,
   createAirwallexIntent,
   finalizeAirwallexPayment,
 } from "@/lib/actions/checkout";
@@ -71,6 +72,13 @@ export default function AirwallexCard({
 
         onReady(async (draft) => {
           if (!card) return { error: "Le formulaire de paiement n'est pas prêt." };
+          /*
+            Nom, téléphone et adresse rattachés à l'intent AVANT la
+            confirmation : l'intent a été créé au montage, quand ces champs
+            étaient encore vides. Volontairement non bloquant — un refus ici
+            ne doit pas empêcher la cliente de payer.
+          */
+          await attachAirwallexIdentity(intentId, draft);
           try {
             // Le 3-D Secure se joue ici, en surcouche Airwallex.
             await card.confirm({ client_secret: clientSecret });

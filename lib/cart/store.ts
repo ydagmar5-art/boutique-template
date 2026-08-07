@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { trackEvent } from "@/lib/actions/analytics";
 import { store } from "@/config/store.config";
+import { detecterSource } from "@/lib/attribution";
 
 function fireCartAdd(slug: string) {
   try {
@@ -94,3 +95,28 @@ export const cartCount = (lines: CartLine[]) =>
 
 export const cartTotal = (lines: CartLine[]) =>
   lines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
+
+/* ── Origine de la visiteuse — cf. `lib/attribution.ts` ── */
+
+const CLE_SOURCE = `${store.prefix}_src`;
+
+export function memoriserSource(): void {
+  try {
+    if (localStorage.getItem(CLE_SOURCE)) return;
+    const s = detecterSource(
+      document.referrer || null,
+      new URLSearchParams(window.location.search),
+    );
+    localStorage.setItem(CLE_SOURCE, s);
+  } catch {
+    /* navigation privée : on se passe d'attribution */
+  }
+}
+
+export function sourceMemorisee(): string {
+  try {
+    return localStorage.getItem(CLE_SOURCE) ?? "direct";
+  } catch {
+    return "direct";
+  }
+}

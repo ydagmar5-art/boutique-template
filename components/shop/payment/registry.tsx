@@ -40,6 +40,8 @@ export interface PayContext {
     firstName: string;
     lastName: string;
     email: string;
+    /** Téléphone du destinataire, tel que saisi. */
+    phone: string;
     address: string;
     city: string;
     zip: string;

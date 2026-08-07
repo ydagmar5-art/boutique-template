@@ -117,6 +117,11 @@ export interface FondyCheckoutInput {
   lang?: string;
   /** Durée de validité du lien de paiement, en secondes. */
   lifetime?: number;
+  /**
+   * Identité du client, encodée en base64 (cf. `lib/payments/identity.ts`).
+   * Alimente le moteur anti-fraude de Fondy et les dossiers de litige.
+   */
+  reservationData?: string;
 }
 
 function checkoutParams(input: FondyCheckoutInput): Record<string, unknown> {
@@ -130,7 +135,26 @@ function checkoutParams(input: FondyCheckoutInput): Record<string, unknown> {
     sender_email: input.email || "",
     lang: input.lang ?? "fr",
     lifetime: String(input.lifetime ?? 3600),
+    ...(input.reservationData ? { reservation_data: input.reservationData } : {}),
   };
+}
+
+/**
+ * Rejoue un appel sans l'identité si Fondy l'a refusé.
+ *
+ * ⚠️ Raison d'être : `reservation_data` n'est qu'un confort d'anti-fraude.
+ * Un compte marchand configuré autrement, un caractère refusé, une évolution
+ * de leur validation — et le client ne pourrait plus payer du tout. On
+ * préfère encaisser sans le champ que perdre la vente.
+ */
+async function avecRepliSansIdentite<T>(
+  input: FondyCheckoutInput,
+  tenter: (i: FondyCheckoutInput) => Promise<{ error?: string } & T>,
+): Promise<{ error?: string } & T> {
+  const premier = await tenter(input);
+  if (!premier.error || !input.reservationData) return premier;
+  console.warn("[fondy] identité refusée, nouvel essai sans :", premier.error);
+  return tenter({ ...input, reservationData: undefined });
 }
 
 /** Jeton de paiement pour le widget embarqué (checkout.js). */
@@ -138,10 +162,12 @@ export async function fondyToken(
   creds: FondyCreds,
   input: FondyCheckoutInput,
 ): Promise<{ token?: string; error?: string }> {
-  const { data, error } = await call("/checkout/token", creds, checkoutParams(input));
-  if (error) return { error };
-  const token = typeof data?.token === "string" ? data.token : undefined;
-  return token ? { token } : { error: "Fondy : jeton de paiement absent." };
+  return avecRepliSansIdentite(input, async (i) => {
+    const { data, error } = await call("/checkout/token", creds, checkoutParams(i));
+    if (error) return { error };
+    const token = typeof data?.token === "string" ? data.token : undefined;
+    return token ? { token } : { error: "Fondy : jeton de paiement absent." };
+  });
 }
 
 /** URL de la page de paiement hébergée (repli sans JavaScript). */
@@ -149,10 +175,12 @@ export async function fondyCheckoutUrl(
   creds: FondyCreds,
   input: FondyCheckoutInput,
 ): Promise<{ url?: string; error?: string }> {
-  const { data, error } = await call("/checkout/url/", creds, checkoutParams(input));
-  if (error) return { error };
-  const url = typeof data?.checkout_url === "string" ? data.checkout_url : undefined;
-  return url ? { url } : { error: "Fondy : URL de paiement absente." };
+  return avecRepliSansIdentite(input, async (i) => {
+    const { data, error } = await call("/checkout/url/", creds, checkoutParams(i));
+    if (error) return { error };
+    const url = typeof data?.checkout_url === "string" ? data.checkout_url : undefined;
+    return url ? { url } : { error: "Fondy : URL de paiement absente." };
+  });
 }
 
 export type FondyOrderStatus =

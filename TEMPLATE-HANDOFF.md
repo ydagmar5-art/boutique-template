@@ -152,6 +152,69 @@ Le mode est **déduit** : config publique exploitable → `embedded`, sinon → 
 
 ---
 
+## 6 bis. Ce que le tunnel envoie à l'extérieur
+
+Trois briques ajoutées en août 2026, toutes remontées depuis une boutique
+réelle. Elles valent pour **toute** boutique du modèle.
+
+### Identité transmise aux processeurs — `lib/payments/identity.ts`
+
+Un paiement qui n'arrive chez le PSP qu'avec un montant et un e-mail prive la
+boutique de trois choses : le contrôle « adresse de la carte vs adresse de
+livraison » (le signal anti-fraude le plus discriminant), les preuves qui
+gagnent un litige « colis non reçu », et la respectabilité du compte marchand
+— un flux sans nom ni adresse ressemble, dans les outils de risque, à une
+passerelle qui encaisse pour un tiers.
+
+| PSP | Ce qui part | Quand |
+|---|---|---|
+| **Stripe** | `shipping` + `metadata` | à la création du PaymentIntent |
+| **Airwallex** | `order.shipping` via `/payment_intents/{id}/update` | juste avant la confirmation (l'intent naît au montage des champs carte) |
+| **Fondy** | `reservation_data` (base64) | à la création du lien |
+| **Genome** | claims `VALUE_FIRST_NAME`, `VALUE_PHONE`, `VALUE_ADDRESS`… | à la signature du JWT |
+
+⚠️ **Fondy n'accepte que des caractères latins non accentués** et rejette la
+requête entière sur un « é ». D'où `sansAccent()`. Sur une boutique française,
+l'oublier casse tous les paiements Fondy.
+
+⚠️ **Aucun de ces appels ne doit pouvoir empêcher un paiement.** Fondy rejoue
+sans l'identité si elle est refusée, Airwallex journalise et continue.
+
+⚠️ **Fondy embarqué reste sans identité** : son jeton est signé au MONTAGE du
+widget, avant toute saisie, et il n'existe pas d'API pour le compléter.
+
+### Suivi remonté au PSP — `lib/payments/tracking.ts`
+
+Au passage en « expédiée », transporteur et numéro partent vers le PSP.
+`Order.pspRef` sert de clé. Stripe accepte `shipping.carrier` et
+`shipping.tracking_number` après encaissement ; Airwallex les reçoit en
+`metadata` (tentative, pas promesse) ; Fondy et Genome n'ont pas d'API pour ça.
+
+La rumeur « sans numéro de suivi le PSP ferme le compte » est fausse. Ce qu'ils
+surveillent est le **taux de litiges** (surveillance à 0,75 % chez Stripe,
+fermeture à 1 %), et le suivi est la preuve qui gagne la catégorie de litige la
+plus fréquente.
+
+### Origine des ventes — `lib/attribution.ts`
+
+Traduit référent et `utm_*` en canal : Pinterest, Snapchat, Instagram, TikTok,
+Facebook, **Google/Bing (SEO)**, **IA (GEO)**, e-mail, publicité, direct.
+
+⚠️ **Premier contact, pas dernier clic.** `memoriserSource()` n'écrit que si la
+clé est absente : une visiteuse venue de Pinterest qui revient trois jours plus
+tard en tapant le nom du site reste comptée en Pinterest. Sinon tout finirait
+en « Direct ».
+
+⚠️ **L'origine se lit sur la page d'ARRIVÉE**, avant tout filtrage de robots :
+`memoriserSource()` est appelé en premier dans `Tracker`. Le référent n'existe
+plus à la deuxième page.
+
+⚠️ **Un nouveau PSP doit recopier `phone`, `pspRef` et `source` dans son appel
+à `createOrder`**, sinon ses ventes remontent toutes en « Direct » et son suivi
+ne part jamais.
+
+---
+
 ## 7. Pièges connus (hérités, tous vérifiés en production)
 
 - ⚠️ **Jamais `npm run build` pendant que `npm run dev` tourne** : le build écrase `.next/`, les chunks passent en 404, l'hydratation meurt (formulaires morts, CSS absent). Symptôme : `window.next === undefined`. Correctif : arrêter le dev, `rm -rf .next`, relancer.
@@ -160,6 +223,10 @@ Le mode est **déduit** : config publique exploitable → `embedded`, sinon → 
 - ⚠️ Un `<button>` dans un `<fieldset disabled>` est désactivé lui aussi — le sortir du fieldset.
 - ⚠️ **Ne rien superposer au conteneur d'un formulaire de paiement** (squelette en overlay, `display:none`) : il s'initialise dans un conteneur mal dimensionné et reste vide.
 - ⚠️ **Tester une commande envoie un vrai e-mail au gérant.** Renseigner `MERCHANT_EMAIL` dans `.env.local` pendant les tests.
+- ⚠️ **`InitiateCheckout` n'était appelé nulle part** jusqu'en août 2026 : l'événement existait dans `lib/pixel-events.ts` mais aucun composant ne le déclenchait. L'entonnoir publicitaire sautait la marche entre l'ajout au panier et l'achat. Corrigé dans `CheckoutClient`. **Toute boutique clonée avant cette date a le trou** — vérifier avant de conclure à un problème de pixel.
+- ⚠️ **Le montant d'`InitiateCheckout` attend le devis serveur** : les offres s'appliquent côté serveur, partir sur le total local annonce plus que ce qui sera encaissé. Repli à 1,5 s pour ne jamais perdre l'événement.
+- ⚠️ **Un secret ne se range JAMAIS dans `PixelConfig`** : cette structure est passée à `PixelScripts`, qui recopie ses valeurs en clair dans le HTML. Pour un jeton serveur (API Conversions par exemple), prévoir un stockage séparé sur le modèle de `lib/payments/gateway-store.ts`.
+- ⚠️ **L'ordre du tableau `products` EST l'ordre de la boutique.** Le gérant le règle en glissant les lignes dans `/admin/products` (`reorderProducts`). N'introduire **aucun tri automatique** — prix, nom, date — sur les listes vitrine : cela annulerait son classement sans prévenir.
 
 ---
 

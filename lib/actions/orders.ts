@@ -19,6 +19,32 @@ import {
   sendOrderCancelled,
   sendOrderRefunded,
 } from "@/lib/emails";
+import { pousserSuiviAuPsp } from "@/lib/payments/tracking";
+
+/**
+ * Transmet le suivi au processeur de paiement, sans jamais faire échouer
+ * l'expédition.
+ *
+ * ⚠️ Le colis est déjà parti quand cette fonction s'exécute : une panne chez
+ * le PSP ne doit ni annuler le passage en « expédiée », ni empêcher l'e-mail
+ * à la cliente. D'où le `catch` muet et l'absence de valeur de retour.
+ */
+async function remonterLeSuivi(order: Order): Promise<void> {
+  try {
+    const res = await pousserSuiviAuPsp(order);
+    if (res.etat === "transmis") {
+      const orders = await read<Order[]>(ORDERS, NO_ORDERS);
+      const cible = orders.find((o) => o.id === order.id);
+      if (cible) {
+        cible.trackingSentAt = new Date().toISOString();
+        await write(ORDERS, orders);
+        revalidatePath(`/admin/orders/${order.id}`);
+      }
+    }
+  } catch (e) {
+    console.warn("[suivi] remontée impossible", e);
+  }
+}
 
 const ORDERS = "orders";
 const CUSTOMERS = "customers";
@@ -50,6 +76,12 @@ export interface NewOrderInput {
   subtotal?: number;
   /** Remises retenues par le serveur (offre automatique et/ou code promo). */
   discounts?: AppliedDiscount[];
+  /** Téléphone du destinataire. */
+  phone?: string;
+  /** Référence de la transaction chez le PSP. */
+  pspRef?: string;
+  /** Origine de la visiteuse (cf. `lib/attribution.ts`). */
+  source?: string;
 }
 
 export async function createOrder(input: NewOrderInput): Promise<{ id: string }> {
@@ -77,6 +109,9 @@ export async function createOrder(input: NewOrderInput): Promise<{ id: string }>
     // Paiement simulé tant que les PSP ne sont pas connectés.
     status: "paid",
     psp: input.psp,
+    phone: input.phone,
+    pspRef: input.pspRef,
+    source: input.source,
     items: input.items,
     ...(input.discounts?.length
       ? { subtotal: input.subtotal, discounts: input.discounts }
@@ -143,7 +178,10 @@ export async function updateOrderStatus(
 
   // E-mail automatique au client selon le nouveau statut (si changement réel).
   if (status !== previous) {
-    if (status === "shipped") await sendOrderShipped(o);
+    if (status === "shipped") {
+      await sendOrderShipped(o);
+      await remonterLeSuivi(o);
+    }
     else if (status === "cancelled") await sendOrderCancelled(o);
     else if (status === "refunded") await sendOrderRefunded(o);
   }
@@ -170,6 +208,8 @@ export async function setOrderTracking(
   revalidatePath(`/order/${id}`);
 
   if (notify && number) await sendOrderShipped(o);
+  // Un numéro saisi (ou corrigé) après l'expédition doit repartir chez le PSP.
+  if (number) await remonterLeSuivi(o);
 }
 
 /** Archive (ou désarchive) des commandes traitées. Sans effet sur les stats. */

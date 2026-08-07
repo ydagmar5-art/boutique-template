@@ -4,10 +4,11 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { brand } from "@/config/brand.config";
-import { useCart, cartTotal } from "@/lib/cart/store";
+import { useCart, cartTotal, sourceMemorisee } from "@/lib/cart/store";
 import { formatPrice } from "@/lib/products";
 import { startCheckout } from "@/lib/actions/checkout";
 import { quoteCart } from "@/lib/actions/promotions";
+import { pixelTrack } from "@/lib/pixel-events";
 import type { AppliedDiscount } from "@/lib/promotions";
 import { embeddedPsp, type ConfirmFn } from "@/components/shop/payment/registry";
 import type { OrderItem } from "@/lib/db/seed";
@@ -99,19 +100,77 @@ export default function CheckoutClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartKey, code]);
 
+  /**
+   * ── Événement « début de paiement » vers les régies ──
+   *
+   * Complète `AddToCart` (fiche produit) et `Purchase` (page de confirmation).
+   * ⚠️ Il MANQUAIT : l'événement existait dans `lib/pixel-events.ts` mais
+   * n'était appelé nulle part. L'entonnoir sautait la marche entre le panier
+   * et l'achat, et les régies ne pouvaient pas optimiser sur les visiteuses
+   * qui arrivent jusqu'au paiement.
+   *
+   * ⚠️ On attend le devis SERVEUR avant d'envoyer : les offres s'appliquent
+   * côté serveur, partir sur le total local annoncerait un montant supérieur
+   * à ce qui sera encaissé. Repli après un court délai pour ne jamais perdre
+   * l'événement.
+   */
+  const checkoutPixelEnvoye = useRef(false);
+  useEffect(() => {
+    if (checkoutPixelEnvoye.current || lines.length === 0) return;
+
+    const envoyer = (montant: number) => {
+      if (checkoutPixelEnvoye.current) return;
+      checkoutPixelEnvoye.current = true;
+      pixelTrack("InitiateCheckout", {
+        value: montant / 100,
+        items: lines.map((l) => ({
+          id: l.slug,
+          name: l.name,
+          price: l.unitPrice / 100,
+          quantity: l.qty,
+        })),
+      });
+    };
+
+    if (quote) return envoyer(quote.total);
+    const repli = window.setTimeout(() => envoyer(localTotal), 1500);
+    return () => window.clearTimeout(repli);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines.length, quote]);
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!payment) return;
     setError("");
     const fd = new FormData(e.currentTarget);
     const items = cartItems;
+    const firstName = String(fd.get("firstName") ?? "").trim();
+    const lastName = String(fd.get("lastName") ?? "").trim();
+    const street = String(fd.get("address") ?? "").trim();
+    const zip = String(fd.get("zip") ?? "").trim();
+    const city = String(fd.get("city") ?? "").trim();
+    const phone = String(fd.get("phone") ?? "").trim();
     const draft = {
-      customer: `${fd.get("firstName")} ${fd.get("lastName")}`.trim(),
+      customer: `${firstName} ${lastName}`.trim(),
       email: String(fd.get("email") || ""),
-      address: `${fd.get("address")}, ${fd.get("zip")} ${fd.get("city")}`,
+      address: `${street}, ${zip} ${city}`,
       items,
       total,
       promoCode: code || undefined,
+      source: sourceMemorisee(),
+      /*
+        Même identité, sous forme exploitable par les PSP : nom séparé du
+        prénom, rue séparée du code postal. Sans elle, le processeur ne peut
+        ni comparer l'adresse de livraison à celle de la carte, ni constituer
+        un dossier de litige (cf. `lib/payments/identity.ts`).
+      */
+      firstName,
+      lastName,
+      phone,
+      street,
+      zip,
+      city,
+      country: "FR",
     };
 
     start(async () => {
@@ -121,12 +180,13 @@ export default function CheckoutClient({
           draft,
           amount: total,
           buyer: {
-            firstName: String(fd.get("firstName") ?? ""),
-            lastName: String(fd.get("lastName") ?? ""),
+            firstName,
+            lastName,
             email: draft.email,
-            address: String(fd.get("address") ?? ""),
-            city: String(fd.get("city") ?? ""),
-            zip: String(fd.get("zip") ?? ""),
+            phone,
+            address: street,
+            city,
+            zip,
             countryCode: "FR",
           },
         });
@@ -186,6 +246,12 @@ export default function CheckoutClient({
               <Field label="Prénom" name="firstName" />
               <Field label="Nom" name="lastName" />
               <Field label="E-mail" name="email" type="email" full />
+              {/*
+                Téléphone : demandé par le livreur, et signal d'anti-fraude
+                côté processeur de paiement. `type="tel"` ouvre le pavé
+                numérique sur mobile ; le format reste libre.
+              */}
+              <Field label="Téléphone" name="phone" type="tel" autoComplete="tel" placeholder="06 12 34 56 78" full />
               <Field label="Adresse" name="address" full />
               <Field label="Code postal" name="zip" />
               <Field label="Ville" name="city" />
@@ -408,11 +474,11 @@ function SectionTitle() {
   );
 }
 
-function Field({ label, name, type = "text", full }: { label: string; name: string; type?: string; full?: boolean }) {
+function Field({ label, name, type = "text", full, autoComplete, placeholder }: { label: string; name: string; type?: string; full?: boolean; autoComplete?: string; placeholder?: string }) {
   return (
     <label className={`block ${full ? "sm:col-span-2" : ""}`}>
       <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      <input name={name} type={type} required className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition focus:border-primary" />
+      <input name={name} type={type} required autoComplete={autoComplete} placeholder={placeholder} className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition placeholder:text-muted/50 focus:border-primary" />
     </label>
   );
 }
