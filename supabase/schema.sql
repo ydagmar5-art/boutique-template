@@ -42,8 +42,14 @@ create table if not exists public.{{prefix}}_visitors (
   count      integer     not null default 1,
   last_path  text,
   ip         text,
-  city       text
+  city       text,
+  -- Origine du PREMIER contact (pinterest, snapchat, google, ia, direct…).
+  -- Jamais réécrite ensuite : c'est ce qui a fait venir le client.
+  source     text
 );
+
+-- Bases déjà en service : ajoute la colonne sans toucher aux données.
+alter table public.{{prefix}}_visitors add column if not exists source text;
 
 alter table public.{{prefix}}_kv       enable row level security;
 alter table public.{{prefix}}_visits    enable row level security;

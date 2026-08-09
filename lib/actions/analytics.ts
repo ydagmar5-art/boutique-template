@@ -8,6 +8,17 @@ import { store } from "@/config/store.config";
 const VISITS = store.db.visits;
 const VISITORS = store.db.visitors;
 
+/*
+  ⚠️ TOLÉRANCE À LA COLONNE `source` MANQUANTE.
+
+  PostgREST REJETTE toute la requête quand on écrit dans une colonne
+  inconnue. Sur une boutique dont la migration n'a pas encore été jouée, le
+  suivi des visites s'arrêterait NET et en silence — pour un simple ornement
+  d'affichage. On tente donc avec l'origine, et on se désarme une fois pour
+  toutes en cas de refus.
+*/
+let colonneSource = true;
+
 /** Récupère IP + ville depuis les en-têtes (fournis par Vercel en production). */
 async function geoFromHeaders(): Promise<{ ip?: string; city?: string }> {
   try {
@@ -28,6 +39,8 @@ export async function trackVisit(
   path: string,
   referrer: string | undefined,
   visitor: string,
+  /** Origine mémorisée par le navigateur à la toute première visite. */
+  source?: string,
 ): Promise<{ count: number; ip?: string; city?: string }> {
   if (path.startsWith("/admin") || !hasSupabase()) return { count: 0 };
   const sb = supabaseAdmin();
@@ -43,20 +56,49 @@ export async function trackVisit(
   await sb
     .from(VISITS)
     .insert({ path, referrer: host, visitor, type: "view", ip, city });
-  const { data } = await sb
-    .from(VISITORS)
-    .select("count")
-    .eq("id", visitor)
-    .maybeSingle();
-  const count = (data?.count ?? 0) + 1;
-  await sb.from(VISITORS).upsert({
+  let existant: { count?: number; source?: string } | null = null;
+  /* `lu` et non `!existant` : un visiteur inconnu rend légitimement null, et
+     retester sur la nullité relancerait une requête à chaque première visite. */
+  let lu = false;
+  if (colonneSource) {
+    const r = await sb
+      .from(VISITORS)
+      .select("count,source")
+      .eq("id", visitor)
+      .maybeSingle();
+    if (r.error) colonneSource = false;
+    else {
+      existant = r.data;
+      lu = true;
+    }
+  }
+  if (!lu) {
+    const r = await sb.from(VISITORS).select("count").eq("id", visitor).maybeSingle();
+    existant = r.data;
+  }
+  const count = (existant?.count ?? 0) + 1;
+
+  const ligne: Record<string, unknown> = {
     id: visitor,
     last_seen: new Date().toISOString(),
     last_path: path,
     count,
     ip,
     city,
-  });
+  };
+  /* ⚠️ PREMIER CONTACT. `upsert` réécrit la ligne entière : sans cette garde,
+     chaque retour d'un client écraserait son origine par celle du jour, et
+     tout finirait attribué à « Direct ». */
+  if (colonneSource && (existant?.source || source)) {
+    ligne.source = existant?.source || source;
+  }
+
+  const { error } = await sb.from(VISITORS).upsert(ligne);
+  if (error && colonneSource) {
+    colonneSource = false;
+    delete ligne.source;
+    await sb.from(VISITORS).upsert(ligne);
+  }
   return { count, ip, city };
 }
 
@@ -189,21 +231,44 @@ export interface VisitorRow {
   lastSeen: string;
   ip: string;
   city: string;
+  /** Origine du PREMIER contact. Absente avant la migration. */
+  source?: string;
 }
 
 export async function getVisitors(limit = 50): Promise<VisitorRow[]> {
   if (!hasSupabase()) return [];
-  const { data } = await supabaseAdmin()
-    .from(VISITORS)
-    .select("id,count,last_path,last_seen,ip,city")
-    .order("last_seen", { ascending: false })
-    .limit(limit);
-  return (data ?? []).map((v) => ({
+  /* ⚠️ Deux appels LITTÉRAUX : le client Supabase déduit le type depuis la
+     chaîne de sélection, une chaîne construite dynamiquement ne compile pas. */
+  const sb = supabaseAdmin();
+  let brut: unknown = null;
+  if (colonneSource) {
+    const r = await sb
+      .from(VISITORS)
+      .select("id,count,last_path,last_seen,ip,city,source")
+      .order("last_seen", { ascending: false })
+      .limit(limit);
+    if (r.error) colonneSource = false;
+    else brut = r.data;
+  }
+  if (!brut) {
+    const r = await sb
+      .from(VISITORS)
+      .select("id,count,last_path,last_seen,ip,city")
+      .order("last_seen", { ascending: false })
+      .limit(limit);
+    brut = r.data;
+  }
+  type Ligne = {
+    id: string; count: number; last_path?: string | null; last_seen: string;
+    ip?: string | null; city?: string | null; source?: string | null;
+  };
+  return ((brut ?? []) as Ligne[]).map((v) => ({
     id: v.id,
     count: v.count,
     lastPath: v.last_path ?? "—",
     lastSeen: v.last_seen,
     ip: v.ip ?? "—",
     city: v.city ?? "—",
+    source: v.source ?? undefined,
   }));
 }

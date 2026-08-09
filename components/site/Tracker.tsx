@@ -102,7 +102,7 @@ export default function Tracker() {
     // Sans Supabase, l'effet de présence sort avant d'avoir posé la
     // référence : `presence()` émettrait un identifiant vide.
     const vid = vidRef.current || (vidRef.current = getVisitorId());
-    trackVisit(pathname, document.referrer || undefined, vid)
+    trackVisit(pathname, document.referrer || undefined, vid, sourceMemorisee())
       .then((res) => {
         countRef.current = res.count;
         geoRef.current = { ip: res.ip, city: res.city };
