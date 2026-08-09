@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { store } from "@/config/store.config";
+import { SOURCE_LABEL, type SourceVente } from "@/lib/attribution";
 
 /** Au-delà, une visiteuse est considérée partie — 3 battements manqués. */
 const PERIME = 50_000;
@@ -14,6 +15,10 @@ interface Online {
   since: number;
   ip?: string;
   city?: string;
+  /* Origine PREMIÈRE de la visiteuse — la même clé que celle attribuée aux
+     ventes, pour que les deux écrans se recoupent. Absente pour les
+     visiteuses connectées avant le déploiement de ce champ. */
+  source?: string;
 }
 
 export default function LiveVisitors() {
@@ -102,7 +107,8 @@ export default function LiveVisitors() {
                   </span>
                 </span>
               </span>
-              <span className="shrink-0 text-xs text-muted">
+              <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
+                <Origine source={v.source} />
                 {v.count > 1 ? `${v.count}ᵉ visite` : "1ʳᵉ visite"}
               </span>
             </li>
@@ -113,5 +119,40 @@ export default function LiveVisitors() {
         Mise à jour instantanée — la page qu&apos;ils regardent en temps réel.
       </p>
     </div>
+  );
+}
+
+/**
+ * Pastille d'origine.
+ *
+ * ⚠️ La couleur ne porte JAMAIS l'information seule — le nom du canal est
+ * toujours écrit à côté, sinon l'écran devient illisible pour qui distingue
+ * mal les teintes.
+ */
+const TEINTES: Partial<Record<SourceVente, string>> = {
+  pinterest: "bg-red-50 text-red-700 border-red-200",
+  snapchat: "bg-yellow-50 text-yellow-800 border-yellow-300",
+  instagram: "bg-pink-50 text-pink-700 border-pink-200",
+  facebook: "bg-blue-50 text-blue-700 border-blue-200",
+  tiktok: "bg-neutral-100 text-neutral-800 border-neutral-300",
+  google: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  publicite: "bg-violet-50 text-violet-700 border-violet-200",
+  ia: "bg-cyan-50 text-cyan-700 border-cyan-200",
+};
+
+function Origine({ source }: { source?: string }) {
+  // Visiteuse arrivée avant le déploiement : on n'invente pas une origine.
+  if (!source) return null;
+  const cle = source as SourceVente;
+  const libelle = SOURCE_LABEL[cle] ?? source;
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[0.65rem] ${
+        TEINTES[cle] ?? "border-line text-muted"
+      }`}
+      title={`Origine : ${libelle}`}
+    >
+      {libelle}
+    </span>
   );
 }

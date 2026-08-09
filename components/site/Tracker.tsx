@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { trackVisit } from "@/lib/actions/analytics";
-import { memoriserSource } from "@/lib/cart/store";
+import { memoriserSource, sourceMemorisee } from "@/lib/cart/store";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { store } from "@/config/store.config";
@@ -33,6 +33,30 @@ export default function Tracker() {
   const pathRef = useRef(pathname);
   pathRef.current = pathname;
 
+  /*
+    Charge utile de présence, en un seul endroit : elle part de trois points
+    (abonnement, battement, après enregistrement de la visite) et trois copies
+    divergeaient au premier champ ajouté.
+
+    ⚠️ `memoriserSource()` est rappelé ici alors qu'il l'est déjà plus bas.
+    C'est VOULU : l'effet de présence est déclaré AVANT celui qui mémorise
+    l'origine, et un abonnement établi trop tôt renverrait « direct » pour une
+    visiteuse pourtant venue d'une campagne. L'appel est sans effet si
+    l'origine est déjà connue — il ne peut pas écraser le premier contact.
+  */
+  const presence = (extra?: { count?: number; ip?: string; city?: string }) => {
+    memoriserSource();
+    return {
+      id: vidRef.current.slice(0, 8),
+      path: pathRef.current,
+      count: extra?.count ?? countRef.current,
+      ip: extra?.ip ?? geoRef.current.ip,
+      city: extra?.city ?? geoRef.current.city,
+      source: sourceMemorisee(),
+      since: Date.now(),
+    };
+  };
+
   // Présence temps réel : rejoint le canal une seule fois.
   useEffect(() => {
     if (pathname.startsWith("/admin")) return;
@@ -44,16 +68,7 @@ export default function Tracker() {
       config: { presence: { key: vid } },
     });
     channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        channel.track({
-          id: vid.slice(0, 8),
-          path: pathname,
-          count: countRef.current,
-          ip: geoRef.current.ip,
-          city: geoRef.current.city,
-          since: Date.now(),
-        });
-      }
+      if (status === "SUBSCRIBED") channel.track(presence());
     });
     channelRef.current = channel;
 
@@ -68,14 +83,7 @@ export default function Tracker() {
     */
     const battement = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      channelRef.current?.track({
-        id: vid.slice(0, 8),
-        path: pathRef.current,
-        count: countRef.current,
-        ip: geoRef.current.ip,
-        city: geoRef.current.city,
-        since: Date.now(),
-      });
+      channelRef.current?.track(presence());
     }, 15_000);
 
     return () => {
@@ -91,19 +99,16 @@ export default function Tracker() {
     if (pathname.startsWith("/admin")) return;
     // Avant tout filtrage : l'origine se lit sur la page d'ARRIVÉE.
     memoriserSource();
-    const vid = vidRef.current || getVisitorId();
+    // Sans Supabase, l'effet de présence sort avant d'avoir posé la
+    // référence : `presence()` émettrait un identifiant vide.
+    const vid = vidRef.current || (vidRef.current = getVisitorId());
     trackVisit(pathname, document.referrer || undefined, vid)
       .then((res) => {
         countRef.current = res.count;
         geoRef.current = { ip: res.ip, city: res.city };
-        channelRef.current?.track({
-          id: vid.slice(0, 8),
-          path: pathname,
-          count: res.count,
-          ip: res.ip,
-          city: res.city,
-          since: Date.now(),
-        });
+        channelRef.current?.track(
+          presence({ count: res.count, ip: res.ip, city: res.city }),
+        );
       })
       .catch(() => {});
   }, [pathname]);
