@@ -222,6 +222,11 @@ ne part jamais.
 - ⚠️ **Les iframes tierces (Stripe, Fondy) apparaissent VIDES sur les captures d'écran** après un zoom, un défilement ou un redimensionnement : le panneau ne les repeint pas. Ne jamais en conclure à une régression — mesurer la hauteur de l'iframe (`getBoundingClientRect().height`). Ce faux négatif a déjà fait accuser à tort une dépendance.
 - ⚠️ Un `<button>` dans un `<fieldset disabled>` est désactivé lui aussi — le sortir du fieldset.
 - ⚠️ **Ne rien superposer au conteneur d'un formulaire de paiement** (squelette en overlay, `display:none`) : il s'initialise dans un conteneur mal dimensionné et reste vide.
+- ⚠️ **Apple Pay et Google Pay : le piège du `www`.** Stripe n'affiche un portefeuille que sur un domaine ENREGISTRÉ, et `www.` est un sous-domaine distinct — « `www` is a subdomain that you must also register ». Quand la condition n'est pas remplie, **rien n'apparaît et aucune erreur n'est levée**. Vu en production : seul le domaine nu était déclaré alors que tout le trafic est redirigé en 308 vers `www`, donc Apple Pay était invisible pour 100 % des visiteuses. Contrôle : `curl -s https://api.stripe.com/v1/payment_method_domains -u "$STRIPE_SECRET_KEY:"`.
+- ⚠️ **Apple exige que la fenêtre de paiement s'ouvre sur un geste utilisateur**, sans code long avant. Si le tunnel fait des allers-retours serveur entre le clic « Payer » et `confirmPayment`, la fenêtre peut ne pas s'ouvrir. La réponse est l'Express Checkout Element, qui porte son propre bouton.
+- ⚠️ **Visiteuses fantômes en temps réel.** Supabase n'émet pas toujours l'événement `leave` : onglet fermé brutalement, veille, coupure réseau. La clé de présence restait et seul un rechargement nettoyait l'affichage. Corrigé : `Tracker` émet un battement toutes les 15 s qui rafraîchit `since`, et `LiveVisitors` écarte quiconque n'a rien émis depuis 50 s, en réévaluant toutes les 8 s. **Ne jamais faire dépendre l'affichage du seul événement `leave`.**
+- ⚠️ **Un son de notification ne se fait PAS avec un AudioContext.** Son autorisation est fragile : il retombe en « suspended » en arrière-plan ou après inactivité, et le réveil hors d'un geste est refusé — or c'est en arrière-plan qu'une notification sert. Utiliser un élément `<audio>` **amorcé pendant un clic** (joué puis mis en pause aussitôt) : il reste rejouable par programme ensuite. Et toujours afficher l'état, sinon un son bloqué est indiscernable d'un son jamais déclenché.
+- ⚠️ **Prix barré : règle des 30 jours.** `Product.compareAtPrice` est purement d'affichage — `price` reste le seul montant débité. Mais en France le prix de référence doit être le prix le plus bas réellement pratiqué dans les 30 jours précédents (art. L112-1-1, directive Omnibus) : un ancien prix inventé est une pratique commerciale trompeuse, et un motif classique de fermeture chez les PSP.
 - ⚠️ **Tester une commande envoie un vrai e-mail au gérant.** Renseigner `MERCHANT_EMAIL` dans `.env.local` pendant les tests.
 - ⚠️ **`InitiateCheckout` n'était appelé nulle part** jusqu'en août 2026 : l'événement existait dans `lib/pixel-events.ts` mais aucun composant ne le déclenchait. L'entonnoir publicitaire sautait la marche entre l'ajout au panier et l'achat. Corrigé dans `CheckoutClient`. **Toute boutique clonée avant cette date a le trou** — vérifier avant de conclure à un problème de pixel.
 - ⚠️ **Le montant d'`InitiateCheckout` attend le devis serveur** : les offres s'appliquent côté serveur, partir sur le total local annonce plus que ce qui sera encaissé. Repli à 1,5 s pour ne jamais perdre l'événement.
@@ -239,6 +244,25 @@ git fetch upstream && git merge upstream/main
 ```
 
 Les conflits se limitent en principe à la peau (`config/*`, vitrine, catalogue), que la boutique possède. Si un conflit apparaît dans le noyau, c'est le signe qu'on a franchi la frontière de la §1.
+
+---
+
+## 8 bis. Reste à faire redescendre
+
+Fait dans Maison Romy, pas encore dans le modèle — à porter au prochain
+passage :
+
+- **Le socle de référencement** : `lib/seo.ts` (canoniques, Open Graph,
+  JSON-LD `Product`/`Offer`/`BreadcrumbList`/`Organization`), `metadataBase`,
+  et `components/site/JsonLd.tsx`. C'est du noyau, valable pour toute
+  boutique. ⚠️ La canonique est indispensable dès qu'on met des liens
+  publicitaires avec `utm_*` : sans elle, chaque variante d'URL est une page
+  dupliquée aux yeux de Google.
+- **Pages de catégorie** (`lib/collections.ts`) : le modèle n'a qu'une page
+  `/products` pour couvrir toutes les familles de produits, là où ce sont les
+  pages de catégorie qui captent les termes réellement cherchés.
+- **Palmarès produits** dans les statistiques, et le détail « total d'ajouts
+  au panier / nombre de personnes ».
 
 ---
 

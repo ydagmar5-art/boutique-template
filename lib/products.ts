@@ -12,6 +12,18 @@ export interface Product {
   tagline: string;
   /** Prix de base en centimes. */
   price: number;
+  /**
+   * Ancien prix, affiché barré à côté du prix courant. Purement indicatif :
+   * il n'entre dans aucun calcul et ne part dans aucun paiement.
+   *
+   * ⚠️ ENCADRÉ PAR LA LOI en France : le prix de référence doit être le prix
+   * le plus bas réellement pratiqué dans les 30 jours précédents
+   * (art. L112-1-1, directive Omnibus). Un ancien prix inventé est une
+   * pratique commerciale trompeuse.
+   *
+   * Ignoré s'il n'est pas strictement supérieur à `price`.
+   */
+  compareAtPrice?: number;
   collection: string;
   /** 1re caractéristique affichée sur la fiche (libellé : « Matières »). */
   material: string;

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { brand } from "@/config/brand.config";
-import { formatPrice, type Product } from "@/lib/products";
+import { type Product } from "@/lib/products";
+import Price from "@/components/shop/Price";
 
 export default function ProductCard({ product }: { product: Product }) {
   return (
@@ -29,8 +30,8 @@ export default function ProductCard({ product }: { product: Product }) {
           <h3 className="font-heading text-lg leading-tight">{product.name}</h3>
           <p className="mt-0.5 text-sm text-muted">{product.tagline}</p>
         </div>
-        <span className="whitespace-nowrap pt-1 text-sm font-medium">
-          {formatPrice(product.price, brand.currency, brand.locale)}
+        <span className="whitespace-nowrap pt-1">
+          <Price prix={product.price} prixBarre={product.compareAtPrice} taille="normal" />
         </span>
       </div>
     </Link>

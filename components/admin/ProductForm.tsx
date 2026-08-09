@@ -27,6 +27,9 @@ export default function ProductForm({
   const [name, setName] = useState(product?.name ?? "");
   const [tagline, setTagline] = useState(product?.tagline ?? "");
   const [price, setPrice] = useState(product ? String(product.price / 100) : "");
+  const [compareAt, setCompareAt] = useState(
+    product?.compareAtPrice ? String(product.compareAtPrice / 100) : "",
+  );
   const [collection, setCollection] = useState(
     product?.collection ?? categories[0] ?? "",
   );
@@ -57,6 +60,14 @@ export default function ProductForm({
       name,
       tagline,
       price: Math.round(parseFloat(price || "0") * 100),
+      /* Vide ⇒ champ absent. Et on refuse une valeur qui ne serait pas
+         STRICTEMENT supérieure au prix : une remise nulle ou négative
+         afficherait « −0 % ». */
+      ...(() => {
+        const barre = Math.round(parseFloat(compareAt || "0") * 100);
+        const courant = Math.round(parseFloat(price || "0") * 100);
+        return barre > courant ? { compareAtPrice: barre } : {};
+      })(),
       collection,
       material,
       detail,
@@ -93,6 +104,21 @@ export default function ProductForm({
         </Label>
         <Label text="Prix (€)">
           <input className={field} type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+        </Label>
+        <Label text="Prix barré (€)">
+          <input
+            className={field}
+            type="number"
+            step="0.01"
+            placeholder="Laisser vide si pas de remise"
+            value={compareAt}
+            onChange={(e) => setCompareAt(e.target.value)}
+          />
+          <p className="mt-1.5 text-xs text-secondary">
+            En France, ce prix doit avoir été réellement pratiqué : la loi
+            impose le prix le plus bas des 30 derniers jours (art. L112-1-1).
+            Un ancien prix inventé est une pratique commerciale trompeuse.
+          </p>
         </Label>
         <Label text="Catégorie">
           <select className={field} value={collection} onChange={(e) => setCollection(e.target.value)}>

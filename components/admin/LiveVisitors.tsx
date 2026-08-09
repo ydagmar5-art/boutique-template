@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { store } from "@/config/store.config";
 
+/** Au-delà, une visiteuse est considérée partie — 3 battements manqués. */
+const PERIME = 50_000;
+
 interface Online {
   id: string;
   path: string;
@@ -38,7 +41,12 @@ export default function LiveVisitors() {
         list.push(meta);
       }
       list.sort((a, b) => b.since - a.since);
-      setOnline(list);
+      /*
+        ⚠️ FANTÔMES. Supabase n'émet pas toujours l'événement `leave`. On
+        écarte donc quiconque n'a pas donné signe de vie depuis PERIME — le
+        battement du Tracker rafraîchit `since` toutes les 15 s.
+      */
+      setOnline(list.filter((v) => Date.now() - v.since < PERIME));
     };
 
     channel
@@ -52,7 +60,12 @@ export default function LiveVisitors() {
         }
       });
 
+    /* La présence ne bouge plus quand personne n'arrive ni ne part : sans ce
+       minuteur, un fantôme resterait affiché jusqu'au rechargement. */
+    const balayage = window.setInterval(sync, 8_000);
+
     return () => {
+      window.clearInterval(balayage);
       sb.removeChannel(channel);
     };
   }, []);

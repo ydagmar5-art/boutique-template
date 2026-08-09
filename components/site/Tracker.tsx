@@ -28,6 +28,10 @@ export default function Tracker() {
   const countRef = useRef<number>(0);
   const vidRef = useRef<string>("");
   const geoRef = useRef<{ ip?: string; city?: string }>({});
+  /* Chemin courant, lu par le battement sans le faire dépendre de `pathname` —
+     sinon chaque navigation recréerait le canal. */
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
 
   // Présence temps réel : rejoint le canal une seule fois.
   useEffect(() => {
@@ -52,7 +56,30 @@ export default function Tracker() {
       }
     });
     channelRef.current = channel;
+
+    /*
+      ── BATTEMENT DE PRÉSENCE ──
+      ⚠️ Sans lui, `since` ne bouge plus dès qu'une visiteuse reste sur la même
+      page, et le back-office ne peut pas distinguer « toujours là » de
+      « partie sans que Supabase ait signalé son départ ». Un onglet fermé
+      brutalement, une coupure réseau ou une mise en veille ne produisent pas
+      toujours d'événement `leave` : le fantôme restait affiché jusqu'au
+      rechargement du tableau de bord.
+    */
+    const battement = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      channelRef.current?.track({
+        id: vid.slice(0, 8),
+        path: pathRef.current,
+        count: countRef.current,
+        ip: geoRef.current.ip,
+        city: geoRef.current.city,
+        since: Date.now(),
+      });
+    }, 15_000);
+
     return () => {
+      window.clearInterval(battement);
       sb.removeChannel(channel);
       channelRef.current = null;
     };

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { brand } from "@/config/brand.config";
 import { useCart } from "@/lib/cart/store";
 import { formatPrice, type Product } from "@/lib/products";
+import Price from "@/components/shop/Price";
 import { pixelTrack } from "@/lib/pixel-events";
 
 const DEFAULT_VARIANT = { id: "standard", label: "Standard", priceDelta: 0, stock: 0 };
@@ -88,9 +89,19 @@ export default function AddToCart({ product }: { product: Product }) {
       </div>
 
       <div className="flex items-center gap-4">
-        <span className="font-heading text-3xl">
-          {formatPrice(unitPrice, brand.currency, brand.locale)}
-        </span>
+        {/* Le prix barré suit la variante : un supplément de coloris décale
+            les deux montants du même écart, sinon la remise afficherait un
+            pourcentage faux. */}
+        <Price
+          prix={unitPrice}
+          prixBarre={
+            product.compareAtPrice
+              ? product.compareAtPrice + variant.priceDelta
+              : undefined
+          }
+          taille="grand"
+          remise
+        />
         {managed && (
           <span
             className={`text-sm ${inStock ? "text-organic" : "text-secondary"}`}
