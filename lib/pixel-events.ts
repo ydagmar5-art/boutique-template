@@ -126,6 +126,25 @@ export function pixelTrack(event: PixelEvent, data: EventData = {}) {
     else w.gtag?.("event", event.toLowerCase(), gaData);
   } catch {}
   try {
+    /*
+      Google Ads ne compte PAS l'événement `purchase` de GA4 : il lui faut son
+      propre événement `conversion` adressé à `send_to`. Sans ce bloc, la régie
+      voit les clics mais aucune vente — et les enchères automatiques ne
+      peuvent rien optimiser.
+
+      `transaction_id` est ce qui permet à Google d'écarter les doublons quand
+      la page de confirmation est rechargée ou partagée.
+    */
+    const sendTo = w.__pxGoogleAdsSendTo;
+    if (event === "Purchase" && sendTo) {
+      w.gtag?.("event", "conversion", {
+        send_to: sendTo,
+        ...money,
+        ...(data.orderId ? { transaction_id: data.orderId } : {}),
+      });
+    }
+  } catch {}
+  try {
     if (event === "Purchase") w._tfa?.push({ notify: "event", name: "purchase", revenue: value });
   } catch {}
 }

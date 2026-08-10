@@ -1,11 +1,12 @@
 import Script from "next/script";
-import type { PixelConfig } from "@/lib/pixels-types";
+import { googleAdsSendTo, type PixelConfig } from "@/lib/pixels-types";
 
 /**
  * Injecte les pixels publicitaires configurés dans le back-office.
  * Chaque script n'est chargé que si son identifiant est renseigné.
  */
 export default function PixelScripts({ pixels }: { pixels: PixelConfig }) {
+  const sendTo = googleAdsSendTo(pixels);
   return (
     <>
       {pixels.meta && (
@@ -51,15 +52,28 @@ r.parentNode.insertBefore(t,r)}}("https://s.pinimg.com/ct/core.js");
 pintrk('load','${pixels.pinterest}');pintrk('page');`}</Script>
       )}
 
-      {pixels.google && (
+      {/*
+        GA4 et Google Ads partagent la MÊME balise gtag.js : on la charge une
+        seule fois, puis on déclare chaque identifiant par un `config`. Charger
+        deux fois le script écraserait la file `dataLayer` en cours de route.
+      */}
+      {(pixels.google || pixels.googleAds) && (
         <>
           <Script
-            src={`https://www.googletagmanager.com/gtag/js?id=${pixels.google}`}
+            src={`https://www.googletagmanager.com/gtag/js?id=${pixels.google || pixels.googleAds}`}
             strategy="afterInteractive"
           />
           <Script id="px-google" strategy="afterInteractive">{`
 window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
-gtag('js',new Date());gtag('config','${pixels.google}');`}</Script>
+gtag('js',new Date());
+${pixels.google ? `gtag('config',${JSON.stringify(pixels.google)});` : ""}
+${pixels.googleAds ? `gtag('config',${JSON.stringify(pixels.googleAds)});` : ""}
+${
+  /* La destination de conversion est posée ici plutôt que passée en accessoire
+     jusqu'à la page de confirmation : elle vient du back-office, et la faire
+     traverser trois composants pour un seul usage n'apporterait rien. */
+  sendTo ? `window.__pxGoogleAdsSendTo=${JSON.stringify(sendTo)};` : ""
+}`}</Script>
         </>
       )}
 
