@@ -2,6 +2,7 @@ import Link from "next/link";
 import { brand } from "@/config/brand.config";
 import Logo from "./Logo";
 import PaymentBadges from "./PaymentBadges";
+import FrenchMark from "./FrenchMark";
 
 export default function Footer() {
   return (
@@ -12,6 +13,9 @@ export default function Footer() {
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-bg/60">
             {brand.description}
           </p>
+          {/* Sur fond sombre : le filet de contour du drapeau suit
+              `currentColor`, d'où `text-bg` pour qu'il reste visible. */}
+          <FrenchMark className="mt-5 text-bg" />
         </div>
         <div>
           <h4 className="mb-4 text-sm font-medium text-halo">Boutique</h4>
@@ -28,6 +32,27 @@ export default function Footer() {
         <div>
           <h4 className="mb-4 text-sm font-medium text-halo">Informations</h4>
           <ul className="space-y-2 text-sm text-bg/60">
+            {/*
+              ⚠️ Contact et Livraison figurent en TÊTE : ce sont les deux pages
+              qu'un prestataire de paiement cherche en premier lors de
+              l'examen du site, et les deux qu'une cliente cherche avant
+              d'acheter. Ne pas les enfouir sous les pages juridiques.
+            */}
+            <li>
+              <Link href="/contact" className="transition-colors hover:text-bg">
+                Contact
+              </Link>
+            </li>
+            <li>
+              <Link href="/livraison" className="transition-colors hover:text-bg">
+                Livraison
+              </Link>
+            </li>
+            <li>
+              <Link href="/blog" className="transition-colors hover:text-bg">
+                Blog
+              </Link>
+            </li>
             <li>
               <Link href="/mentions-legales" className="transition-colors hover:text-bg">
                 Mentions légales
@@ -90,9 +115,18 @@ export default function Footer() {
         </div>
       </div>
       <div className="border-t border-bg/10">
-        <div className="mx-auto max-w-6xl px-5 py-5 text-center text-xs text-bg/40 sm:px-8">
-          © {new Date().getFullYear()} {brand.name} — {brand.legalName}. Tous
-          droits réservés.
+        {/*
+          ⚠️ Raison sociale, numéro d'immatriculation et siège en pied de PAGE,
+          sur toutes les pages : c'est ce que cherche un examinateur de compte
+          de paiement en premier, et il ne va pas toujours jusqu'aux mentions
+          légales. L'identité affichée doit correspondre EXACTEMENT au
+          titulaire du compte.
+        */}
+        <div className="mx-auto max-w-6xl px-5 py-5 text-center text-xs leading-relaxed text-bg/40 sm:px-8">
+          © {new Date().getFullYear()} {brand.name} PARIS. Tous droits réservés.
+          <br />
+          {brand.legal.operator} — {brand.legal.registry.split(",")[0]} n°{" "}
+          {brand.legal.registrationNumber} — {brand.legal.address}
         </div>
       </div>
     </footer>

@@ -59,31 +59,51 @@ export default function Reassurances({
 }: {
   variant?: "bar" | "compact";
 }) {
+  /*
+    Variante « compact » (fiche produit). Angles droits : le cadre arrondi du
+    modèle jurait avec le reste du site, et sautait aux yeux sur mobile où le
+    bloc occupe toute la largeur. Icône à gauche du texte plutôt qu'au-dessus :
+    en deux colonnes étroites, l'empilement centré donnait quatre cellules
+    hautes et vides.
+  */
   if (variant === "compact") {
     return (
-      <div className="grid grid-cols-2 divide-y divide-line rounded-2xl border border-line sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+      <div className="grid grid-cols-2 gap-x-5 gap-y-6 border-y border-line py-6 sm:grid-cols-4 sm:gap-x-6">
         {ITEMS.map((it) => (
-          <div
-            key={it.title}
-            className="flex flex-col items-center gap-1.5 px-3 py-5 text-center"
-          >
+          <div key={it.title} className="flex items-start gap-2.5">
             <Icon name={it.icon} />
-            <p className="text-[13px] font-medium leading-tight">{it.title}</p>
-            <p className="text-[11px] text-muted">{it.sub}</p>
+            <div className="min-w-0">
+              <p className="text-[0.72rem] font-medium leading-[1.3]">
+                {it.title}
+              </p>
+              <p className="mt-1 text-[0.66rem] leading-[1.35] text-muted">
+                {it.sub}
+              </p>
+            </div>
           </div>
         ))}
       </div>
     );
   }
 
+  /*
+    ⚠️ Était un `flex flex-wrap justify-center` : sur mobile, chaque ligne se
+    centrait INDÉPENDAMMENT des autres, donc les icônes se retrouvaient à
+    quatre abscisses différentes — un bloc en escalier, illisible.
+    Grille 2×2 alignée sur mobile, rangée aérée à partir de `sm`.
+  */
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
+    <div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-12 sm:gap-y-4">
       {ITEMS.map((it) => (
-        <div key={it.title} className="flex items-center gap-3">
+        <div key={it.title} className="flex items-start gap-2.5 sm:items-center sm:gap-3">
           <Icon name={it.icon} />
-          <div>
-            <p className="text-sm font-medium leading-tight">{it.title}</p>
-            <p className="text-xs text-muted">{it.sub}</p>
+          <div className="min-w-0">
+            <p className="text-[0.72rem] font-medium leading-[1.3] sm:text-sm sm:leading-tight">
+              {it.title}
+            </p>
+            <p className="mt-1 text-[0.66rem] leading-[1.35] text-muted sm:mt-0 sm:text-xs">
+              {it.sub}
+            </p>
           </div>
         </div>
       ))}

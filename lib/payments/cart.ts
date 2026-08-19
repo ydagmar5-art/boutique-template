@@ -2,7 +2,8 @@ import "server-only";
 import { listVisibleProducts } from "@/lib/actions/products";
 import { listPromotions } from "@/lib/actions/promotions";
 import { applyPromotions, type AppliedDiscount, type PromoLine } from "@/lib/promotions";
-import type { OrderItem } from "@/lib/db/seed";
+import { read } from "@/lib/db/store";
+import type { Order, OrderItem } from "@/lib/db/seed";
 
 /**
  * ╔══════════════════════════════════════════════════════════════════════╗
@@ -22,6 +23,25 @@ import type { OrderItem } from "@/lib/db/seed";
 /** Garde-fou de saisie : au-delà, c'est une erreur ou un abus, pas une commande. */
 const MAX_QTY = 99;
 
+/**
+ * Codes promo déjà consommés par cette adresse e-mail, en majuscules.
+ *
+ * On lit l'historique des commandes plutôt qu'un compteur dédié : la commande
+ * est la seule preuve qu'un code a réellement servi, et elle est écrite
+ * derrière le verrou de `createOrderOnce`. Un compteur incrémenté à
+ * l'affichage du panier s'épuiserait au premier rechargement de page.
+ */
+async function codesDejaUtilises(email?: string): Promise<string[]> {
+  const clean = email?.trim().toLowerCase();
+  if (!clean) return [];
+  const orders = await read<Order[]>("orders", []);
+  return orders
+    .filter((o) => o.email?.trim().toLowerCase() === clean)
+    .flatMap((o) => o.discounts ?? [])
+    .map((d) => d.code?.trim().toUpperCase())
+    .filter((c): c is string => !!c);
+}
+
 export interface ValidatedCart {
   /** Lignes reconstruites depuis le catalogue (prix serveur). */
   items: OrderItem[];
@@ -39,6 +59,12 @@ export async function validateCart(
   items: OrderItem[] | undefined,
   /** Code promo saisi au paiement. */
   code?: string,
+  /**
+   * E-mail de la cliente, quand il est connu. Sert UNIQUEMENT aux codes
+   * marqués `oncePerCustomer` : sans lui, un code de bienvenue serait
+   * réutilisable indéfiniment par la même personne.
+   */
+  buyerEmail?: string,
 ): Promise<{ cart?: ValidatedCart; error?: string }> {
   if (!Array.isArray(items) || items.length === 0) {
     return { error: "Votre panier est vide." };
@@ -106,7 +132,13 @@ export async function validateCart(
   // Les offres sont appliquées ICI, après reconstruction des prix : une remise
   // calculée sur un panier non vérifié se contournerait aussi facilement qu'un
   // total falsifié.
-  const totals = applyPromotions(promoLines, await listPromotions(), code);
+  const totals = applyPromotions(
+    promoLines,
+    await listPromotions(),
+    code,
+    new Date(),
+    await codesDejaUtilises(buyerEmail),
+  );
 
   return {
     cart: {

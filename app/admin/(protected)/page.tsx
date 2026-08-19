@@ -2,13 +2,26 @@ import Link from "next/link";
 import { brand } from "@/config/brand.config";
 import { formatPrice } from "@/lib/products";
 import { listOrders } from "@/lib/actions/orders";
+import { listVisibleProducts } from "@/lib/actions/products";
+import { getStorefrontSettings, getHeroProduct } from "@/lib/actions/storefront";
 import { statusLabel, STATUS_STYLE } from "@/lib/db/seed";
 import StatsExplorer from "@/components/admin/StatsExplorer";
+import HeroPicker from "@/components/admin/HeroPicker";
+import OfferDeadlinePicker from "@/components/admin/OfferDeadlinePicker";
+import MaisonForm from "@/components/admin/MaisonForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
-  const orders = await listOrders();
+  const [orders, products, settings, hero] = await Promise.all([
+    listOrders(),
+    listVisibleProducts(),
+    getStorefrontSettings(),
+    getHeroProduct(),
+  ]);
+  // Le réglage peut pointer vers un modèle masqué depuis : on affiche celui
+  // qui est RÉELLEMENT en vitrine, pas celui qui est enregistré.
+  const heroSlug = hero?.slug ?? settings.heroSlug;
 
   return (
     <div>
@@ -25,10 +38,23 @@ export default async function AdminDashboard() {
         </Link>
       </header>
 
+      <div className="mb-8 grid gap-5 lg:grid-cols-2">
+        {products.length > 0 && (
+          <HeroPicker products={products} current={heroSlug} />
+        )}
+        <OfferDeadlinePicker current={settings.offerDeadline} />
+      </div>
+
+      {/* Pleine largeur : le texte de la Maison fait plusieurs paragraphes,
+          il serait illisible dans une colonne de moitié d'écran. */}
+      <div className="mb-8">
+        <MaisonForm initial={settings.maison} />
+      </div>
+
       {/* Sélecteur de période + graphique combiné audience / ventes / panier */}
       <StatsExplorer />
 
-      <div className="mt-8 rounded-2xl border border-line bg-surface">
+      <div className="mt-8 overflow-x-auto rounded-2xl border border-line bg-surface">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <h2 className="font-medium">Commandes récentes</h2>
           <Link href="/admin/orders" className="text-sm text-primary-dark hover:underline">
@@ -38,7 +64,7 @@ export default async function AdminDashboard() {
         {orders.length === 0 ? (
           <p className="px-6 py-8 text-sm text-muted">Aucune commande pour l&apos;instant.</p>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[38rem] text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wider text-muted">
                 <th className="px-6 py-3 font-medium">Commande</th>

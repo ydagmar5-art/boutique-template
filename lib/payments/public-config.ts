@@ -37,13 +37,43 @@ export const PSP_PUBLIC_CONFIG: Record<string, Builder> = {
 
   fondy: (v) => (v.merchantId ? { merchantId: v.merchantId } : null),
 
+  /*
+    Whop n'expose AUCUNE clé publique : la session de paiement est créée côté
+    serveur et c'est elle qui porte le montant. On vérifie seulement que la
+    clé serveur est enregistrée, sinon les champs ne pourraient pas se monter.
+  */
+  whop: (v, mode, secretsSet) => (secretsSet.includes("apiKey") ? {} : null),
+
   // Airwallex n'a pas de clé publique : le PaymentIntent est créé côté serveur
   // et c'est lui qui porte le secret de session. On vérifie donc simplement que
   // les identifiants serveur sont là, sinon les champs ne pourraient pas se
   // monter (l'intent partirait en erreur).
+  // Mollie : le navigateur n'a besoin que du profileId (public par nature) et
+  // du mode. Le `testmode` se DÉDUIT du préfixe de la clé API, pas de l'onglet
+  // choisi dans le back-office : une clé `test_` rangée en « live » monterait
+  // sinon des champs en mode production et ferait échouer la tokenisation.
+  mollie: (v, mode, secretsSet) =>
+    v.profileId && secretsSet.includes("apiKey")
+      ? { profileId: v.profileId, testmode: mode !== "live" }
+      : null,
+
   airwallex: (v, mode, secretsSet) =>
     v.clientId && secretsSet.includes("apiKey")
       ? { env: mode === "live" ? "prod" : "demo" }
+      : null,
+
+  /**
+   * Viva : rien de secret ici non plus. Le jeton OAuth dont le SDK a besoin
+   * n'est PAS transmis à ce stade — il est délivré au moment de créer l'ordre,
+   * juste avant le paiement, pour que sa durée de vie couvre la saisie de la
+   * carte et rien de plus.
+   */
+  viva: (v, mode, secretsSet) =>
+    v.merchantId &&
+    v.sourceCode &&
+    secretsSet.includes("apiKey") &&
+    secretsSet.includes("clientSecret")
+      ? { demo: mode !== "live" }
       : null,
 };
 

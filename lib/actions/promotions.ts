@@ -8,8 +8,57 @@ import type { OrderItem } from "@/lib/db/seed";
 
 const KEY = "promotions";
 
+/**
+ * Offre en cours : une pièce achetée, la seconde à moitié prix. Sans `code`,
+ * elle s'applique seule dès que le panier atteint deux articles.
+ *
+ * `buyQty: 1` + `getQty: 1` → le moteur raisonne par groupes de deux
+ * articles : 2 au panier = 1 remisé, 4 au panier = 2 remisés.
+ *
+ * ⚠️ `read()` ne re-seede QUE si la clé est absente en base. Une fois la clé
+ * `promotions` écrite (première visite de la boutique), modifier ce seed n'a
+ * plus aucun effet : il faut passer par `/admin/promotions`, ou supprimer la
+ * clé pour rejouer le seed.
+ *
+ * ⚠️ Le moteur remise les articles les MOINS chers (`lib/promotions.ts`) —
+ * usage du commerce, et seule lecture qui ne fasse pas perdre d'argent.
+ */
+const SEED: Promotion[] = [
+  {
+    id: "duo",
+    name: "Une pièce achetée, la seconde à -40 %",
+    enabled: true,
+    kind: "bogo",
+    scope: "all",
+    buyQty: 1,
+    getQty: 1,
+    getPercent: 40,
+  },
+  /**
+   * Code de bienvenue envoyé à l'inscription à la lettre (`lib/emails.ts`).
+   *
+   * Il porte un `code`, donc il ne s'applique QUE s'il est saisi, et le
+   * moteur le cumule par-dessus l'offre automatique — c'est exactement ce
+   * qui était demandé.
+   *
+   * ⚠️ `oncePerCustomer` et SURTOUT PAS `usageLimit: 1` : une limite globale
+   * brûlerait le code dès la première commande, pour toutes les inscrites
+   * suivantes.
+   */
+  {
+    id: "bienvenue",
+    name: "Code de bienvenue",
+    enabled: true,
+    kind: "percent",
+    scope: "all",
+    code: "BVN10",
+    percent: 10,
+    oncePerCustomer: true,
+  },
+];
+
 export async function listPromotions(): Promise<Promotion[]> {
-  return read<Promotion[]>(KEY, []);
+  return read<Promotion[]>(KEY, SEED);
 }
 
 /**
@@ -22,6 +71,13 @@ export async function listPromotions(): Promise<Promotion[]> {
 export async function quoteCart(
   items: OrderItem[],
   code?: string,
+  /**
+   * E-mail saisi au paiement, dès qu'il est connu. Permet de refuser un code
+   * « une fois par cliente » AVANT le clic sur Payer : sans lui, la remise
+   * s'afficherait puis disparaîtrait au moment de débiter — le pire moment
+   * pour annoncer un prix plus élevé.
+   */
+  buyerEmail?: string,
 ): Promise<{
   subtotal?: number;
   total?: number;
@@ -29,7 +85,7 @@ export async function quoteCart(
   codeError?: string;
   error?: string;
 }> {
-  const { cart, error } = await validateCart(items, code);
+  const { cart, error } = await validateCart(items, code, buyerEmail);
   if (error || !cart) return { error };
   return {
     subtotal: cart.subtotal,

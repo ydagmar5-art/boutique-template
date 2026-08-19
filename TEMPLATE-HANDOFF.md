@@ -1,5 +1,14 @@
 # Modèle de boutique — dossier de reprise
 
+> ⚠️ **Mis à niveau le 19 août 2026 depuis Maison Romy Paris**, boutique en
+> production. Le modèle porte désormais tout ce qui y avait été corrigé :
+> quatre passerelles fonctionnelles, Apple Pay, webhooks de rattrapage,
+> réglage du quota d'images, blog, collections, SEO, statistiques.
+>
+> **Les pièges rencontrés sont documentés dans le skill `/new-store`**, section
+> « Leçons de Maison Romy Paris ». Les lire avant de brancher un PSP : chacun
+> vient d'un défaut qui a atteint un site en ligne.
+
 > Moteur e-commerce white-label. Next.js 15 (App Router, TS, Tailwind v3) · Supabase Postgres · Vercel.
 > **Ce dossier ne se déploie pas.** On le clone pour créer une boutique.
 > Origine : extrait d'AURA (atelier-aura-design.store) en juillet 2026, après validation en production.

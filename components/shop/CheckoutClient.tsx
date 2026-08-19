@@ -13,6 +13,8 @@ import type { AppliedDiscount } from "@/lib/promotions";
 import { embeddedPsp, type ConfirmFn } from "@/components/shop/payment/registry";
 import type { OrderItem } from "@/lib/db/seed";
 import PaymentBadges from "@/components/site/PaymentBadges";
+import Reassurances from "@/components/site/Reassurances";
+import FrenchMark from "@/components/site/FrenchMark";
 
 /** Récapitulatif chiffré par le serveur (seul juge du montant). */
 interface Quote {
@@ -50,10 +52,22 @@ export default function CheckoutClient({
   const [error, setError] = useState(initialError);
   const localTotal = cartTotal(lines);
   const confirm = useRef<ConfirmFn | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  /**
+   * Vrai quand tous les champs obligatoires sont remplis.
+   *
+   * Sert de verrou aux boutons de portefeuille (Apple Pay) : ils ouvrent la
+   * feuille de paiement d'un simple appui, sans passer par la validation du
+   * formulaire. Les laisser accessibles trop tôt reviendrait à encaisser sans
+   * savoir où expédier.
+   */
+  const [formValide, setFormValide] = useState(false);
   /** Code saisi, puis code réellement appliqué (validé par le serveur). */
   const [codeInput, setCodeInput] = useState("");
   const [code, setCode] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
+  /** E-mail saisi : sert à valider les codes « une fois par cliente ». */
+  const [buyerEmail, setBuyerEmail] = useState("");
   /** Le serveur fait foi sur le montant : tant qu'il n'a pas répondu, on
    *  affiche la somme des articles, sans remise. */
   const total = quote?.total ?? localTotal;
@@ -89,30 +103,34 @@ export default function CheckoutClient({
   useEffect(() => {
     if (lines.length === 0) return setQuote(null);
     let cancelled = false;
-    quoteCart(cartItems, code || undefined).then((q) => {
+    quoteCart(cartItems, code || undefined, buyerEmail || undefined).then((q) => {
       if (!cancelled && !q.error) setQuote(q as Quote);
     });
     return () => {
       cancelled = true;
     };
     // `cartItems` est reconstruit à chaque rendu : on ne réagit qu'à un vrai
-    // changement de panier (via sa signature) ou de code appliqué.
+    // changement de panier (via sa signature), de code appliqué, ou d'e-mail
+    // saisi — ce dernier peut invalider un code « une fois par cliente ».
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cartKey, code]);
+  }, [cartKey, code, buyerEmail]);
 
   /**
    * ── Événement « début de paiement » vers les régies ──
    *
    * Complète `AddToCart` (fiche produit) et `Purchase` (page de confirmation).
-   * ⚠️ Il MANQUAIT : l'événement existait dans `lib/pixel-events.ts` mais
-   * n'était appelé nulle part. L'entonnoir sautait la marche entre le panier
-   * et l'achat, et les régies ne pouvaient pas optimiser sur les visiteuses
-   * qui arrivent jusqu'au paiement.
+   * Sans lui, l'entonnoir des régies saute une marche : Snapchat et Meta ne
+   * peuvent pas optimiser sur les visiteuses qui arrivent jusqu'ici, et le
+   * taux d'abandon au paiement devient invisible côté publicité.
    *
-   * ⚠️ On attend le devis SERVEUR avant d'envoyer : les offres s'appliquent
-   * côté serveur, partir sur le total local annoncerait un montant supérieur
-   * à ce qui sera encaissé. Repli après un court délai pour ne jamais perdre
-   * l'événement.
+   * ⚠️ On attend le devis SERVEUR avant d'envoyer, car l'offre « la 2e à
+   * −40 % » s'applique côté serveur : partir sur le total local annoncerait
+   * un montant supérieur à ce qui sera réellement encaissé, et fausserait la
+   * valeur apprise par les algorithmes.
+   *
+   * ⚠️ Mais on part quand même après un court délai si le devis ne répond
+   * pas : mieux vaut un montant approché qu'un événement jamais envoyé — une
+   * marche manquante dans l'entonnoir est bien plus coûteuse.
    */
   const checkoutPixelEnvoye = useRef(false);
   useEffect(() => {
@@ -135,8 +153,52 @@ export default function CheckoutClient({
     if (quote) return envoyer(quote.total);
     const repli = window.setTimeout(() => envoyer(localTotal), 1500);
     return () => window.clearTimeout(repli);
+    // `lines` et `localTotal` sont lus au moment de l'envoi : seules la
+    // présence d'articles et l'arrivée du devis doivent relancer l'effet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines.length, quote]);
+
+  /**
+   * Brouillon construit à partir des champs du formulaire.
+   *
+   * ⚠️ Extrait de `handleSubmit` pour être réutilisable par les moyens de
+   * paiement qui ont leur PROPRE bouton — Apple Pay en tête. Sans ça, un
+   * paiement par portefeuille créerait une commande sans destinataire, alors
+   * que la cliente vient précisément de saisir ses coordonnées au-dessus.
+   */
+  const construireDraft = (form: HTMLFormElement) => {
+    const fd = new FormData(form);
+    const items = cartItems;
+    const firstName = String(fd.get("firstName") ?? "").trim();
+    const lastName = String(fd.get("lastName") ?? "").trim();
+    const street = String(fd.get("address") ?? "").trim();
+    const zip = String(fd.get("zip") ?? "").trim();
+    const city = String(fd.get("city") ?? "").trim();
+    const phone = String(fd.get("phone") ?? "").trim();
+    return {
+      customer: `${firstName} ${lastName}`.trim(),
+      email: String(fd.get("email") || ""),
+      address: `${street}, ${zip} ${city}`,
+      items,
+      total,
+      promoCode: code || undefined,
+      source: sourceMemorisee(),
+      firstName,
+      lastName,
+      phone,
+      street,
+      zip,
+      city,
+      country: "FR",
+    };
+  };
+
+  /** Brouillon courant, ou `null` si un champ obligatoire manque encore. */
+  const draftSiComplet = () => {
+    const form = formRef.current;
+    if (!form || !form.checkValidity()) return null;
+    return construireDraft(form);
+  };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -174,6 +236,30 @@ export default function CheckoutClient({
     };
 
     start(async () => {
+      /*
+        🔒 LE MONTANT AFFICHÉ DOIT ÊTRE LE MONTANT DÉBITÉ.
+        L'e-mail n'est remonté au serveur qu'à la sortie du champ. Une
+        cliente qui saisit son adresse puis clique aussitôt sur Payer, sans
+        que le champ ait perdu le focus, verrait encore la remise d'un code
+        « une fois par cliente » que le serveur va refuser — et serait
+        débitée plus que le total affiché.
+        On revalide donc avec l'e-mail RÉELLEMENT saisi, et on s'arrête si
+        le total a bougé, plutôt que d'encaisser une somme jamais montrée.
+      */
+      const controle = await quoteCart(items, code || undefined, draft.email);
+      if (
+        !controle.error &&
+        typeof controle.total === "number" &&
+        controle.total !== total
+      ) {
+        setQuote(controle as Quote);
+        setBuyerEmail(draft.email);
+        setError(
+          "Le montant de votre commande vient d'être mis à jour. Vérifiez le récapitulatif avant de valider.",
+        );
+        return;
+      }
+
       // ── Paiement sur place : le PSP encaisse sans quitter le site ──
       if (psp && confirm.current) {
         const res = await confirm.current({
@@ -239,19 +325,61 @@ export default function CheckoutClient({
     <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-16">
       <h1 className="mb-10 font-heading text-4xl">Paiement</h1>
       <div className="grid gap-12 lg:grid-cols-[1.3fr_1fr]">
-        <form className="space-y-8" onSubmit={handleSubmit}>
+        <form
+          ref={formRef}
+          className="space-y-8"
+          onSubmit={handleSubmit}
+          /*
+            ⚠️ TROIS déclencheurs, et ce n'est pas de la ceinture-bretelles :
+            de cet état dépend l'AFFICHAGE MÊME du moyen de paiement (Whop) et
+            du bouton Apple Pay. S'il restait faux, la cliente n'aurait aucun
+            moyen de payer.
+
+            · `onInput`  : la frappe, au caractère près — React n'émet `change`
+                           qu'à la sortie du champ.
+            · `onChange` : le remplissage automatique du navigateur, qui
+                           n'émet pas toujours `input` (Safari notamment).
+            · `onBlur`   : dernier filet, à la sortie de n'importe quel champ.
+          */
+          onInput={(e) => setFormValide(e.currentTarget.checkValidity())}
+          onChange={(e) => setFormValide(e.currentTarget.checkValidity())}
+          onBlur={(e) => setFormValide(e.currentTarget.checkValidity())}
+        >
           <section>
             <h2 className="mb-4 font-heading text-xl">Coordonnées</h2>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Prénom" name="firstName" />
               <Field label="Nom" name="lastName" />
-              <Field label="E-mail" name="email" type="email" full />
               {/*
-                Téléphone : demandé par le livreur, et signal d'anti-fraude
-                côté processeur de paiement. `type="tel"` ouvre le pavé
-                numérique sur mobile ; le format reste libre.
+                L'e-mail est remonté à la sortie du champ (pas à chaque
+                frappe) : il sert à vérifier les codes « une fois par
+                cliente », et interroger le serveur à chaque caractère
+                n'apporterait rien.
               */}
-              <Field label="Téléphone" name="phone" type="tel" autoComplete="tel" placeholder="06 12 34 56 78" full />
+              <Field
+                label="E-mail"
+                name="email"
+                type="email"
+                full
+                onBlur={setBuyerEmail}
+              />
+              {/*
+                Téléphone : demandé par le livreur (Colissimo l'utilise pour
+                les avis de passage et la remise en point relais), et signal
+                d'anti-fraude côté processeur de paiement. `type="tel"` ouvre
+                le pavé numérique sur mobile ; le format reste libre, les
+                clientes écrivent aussi bien « 06 12 34 56 78 » que
+                « +33612345678 ».
+              */}
+              <Field
+                label="Téléphone"
+                name="phone"
+                type="tel"
+                autoComplete="tel"
+                placeholder="06 12 34 56 78"
+                hint="Pour la livraison"
+                full
+              />
               <Field label="Adresse" name="address" full />
               <Field label="Code postal" name="zip" />
               <Field label="Ville" name="city" />
@@ -286,7 +414,6 @@ export default function CheckoutClient({
                 </div>
               </div>
               <p className="mt-3 flex items-center gap-2 text-xs text-muted">
-                <span>🔒</span>
                 Mode TEST : le paiement est validé automatiquement, aucun débit réel.
               </p>
             </section>
@@ -302,6 +429,8 @@ export default function CheckoutClient({
                     amount={total}
                     items={cartItems}
                     promoCode={code || undefined}
+                    formValide={formValide}
+                    getDraft={draftSiComplet}
                     onReady={(fn) => {
                       confirm.current = fn;
                     }}
@@ -314,12 +443,17 @@ export default function CheckoutClient({
                   amount={total}
                   items={cartItems}
                   promoCode={code || undefined}
+                  formValide={formValide}
+                  getDraft={draftSiComplet}
                   onReady={(fn) => {
                     confirm.current = fn;
                   }}
                   onUnavailable={() => setWidgetDown(true)}
                 />
               )}
+              {/* Marque du prestataire qui encaisse RÉELLEMENT — jamais celle
+                  d'un autre. Voir `BrandMark` dans le registre. */}
+              {psp.BrandMark && <psp.BrandMark />}
             </section>
           ) : deadEnd ? (
             <section>
@@ -336,12 +470,11 @@ export default function CheckoutClient({
               <h2 className="mb-4 font-heading text-xl">Paiement sécurisé</h2>
               <div className="rounded-xl border border-line bg-surface p-6 text-sm">
                 <p className="flex items-center gap-2">
-                  <span>🔒</span>
                   Vous allez être redirigé vers la page de paiement sécurisée{" "}
                   <strong>{payment.name}</strong> pour régler par carte.
                 </p>
                 <p className="mt-2 text-xs text-muted">
-                  Aucune donnée bancaire ne transite par notre site.
+                  Aucune donnée bancaire ne transite par ce site.
                 </p>
               </div>
             </section>
@@ -349,13 +482,40 @@ export default function CheckoutClient({
 
           {error && <p className="text-sm text-secondary">{error}</p>}
 
+          {/*
+            ⚠️ Un libellé « Traitement… » FIXE se lit comme un plantage : entre
+            la tokenisation, le 3-D Secure et la création de la commande, il
+            peut s'écouler plusieurs secondes pendant lesquelles rien ne bouge
+            à l'écran. Le client reclique, ou pire, ferme l'onglet en pleine
+            autorisation. D'où l'anneau animé + une phrase qui dit ce qui se
+            passe et demande explicitement de ne pas fermer la page.
+          */}
           <button
             type="submit"
             disabled={pending || !payment || deadEnd}
-            className="w-full rounded-full bg-ink py-4 text-sm font-medium text-bg transition-all duration-300 hover:scale-[0.99] hover:bg-primary-dark disabled:opacity-60"
+            aria-busy={pending}
+            className="flex w-full items-center justify-center gap-3 rounded-full bg-ink py-4 text-sm font-medium text-bg transition-all duration-300 hover:scale-[0.99] hover:bg-primary-dark disabled:opacity-60"
           >
-            {pending ? "Traitement…" : `Payer ${formatPrice(total, brand.currency, brand.locale)}`}
+            {pending && (
+              <span
+                aria-hidden
+                className="h-4 w-4 shrink-0 rounded-full border-2 border-bg/30 border-t-bg motion-safe:animate-spin"
+              />
+            )}
+            {pending
+              ? "Paiement en cours…"
+              : `Payer ${formatPrice(total, brand.currency, brand.locale)}`}
           </button>
+
+          {pending && (
+            <p
+              role="status"
+              className="text-center text-xs leading-relaxed text-muted"
+            >
+              Votre banque vérifie le paiement. Merci de ne pas fermer cette
+              page ni recharger.
+            </p>
+          )}
 
           {/* Réassurances paiement */}
           <div className="flex flex-col items-center gap-3 pt-1">
@@ -372,6 +532,23 @@ export default function CheckoutClient({
 
         <aside className="h-fit rounded-2xl border border-line bg-surface p-6">
           <h2 className="mb-5 font-heading text-xl">Votre commande</h2>
+
+          {/*
+            Rappel de l'offre au panier — mais UNIQUEMENT tant qu'elle n'est
+            pas encore acquise. Une fois la remise appliquée, elle apparaît
+            déjà dans le récapitulatif : la répéter ferait doublon et
+            donnerait l'impression d'une double réduction.
+          */}
+          {lines.length === 1 && lines[0].qty === 1 && (
+            <Link
+              href="/products"
+              className="mb-5 block border border-line px-4 py-3 text-center text-[0.68rem] leading-relaxed text-muted transition-colors hover:border-ink"
+            >
+              <span className="text-ink">{brand.offer.short}</span>
+              <br />
+              Ajouter une seconde pièce
+            </Link>
+          )}
           <div className="space-y-4">
             {lines.map((l) => (
               <div key={`${l.slug}-${l.variantId}`} className="flex gap-3">
@@ -441,11 +618,8 @@ export default function CheckoutClient({
             ))}
             <div className="flex items-center justify-between text-muted">
               <span>Livraison</span>
-              <span className="flex items-center gap-2">
-                <span className="inline-flex items-center rounded bg-[#FFCC00] px-1.5 py-0.5 text-[10px] font-bold italic text-[#D40511]">
-                  DHL
-                </span>
-                <span className="font-medium text-organic">Offerte</span>
+              <span className="font-medium text-organic">
+                {brand.shippingNote}
               </span>
             </div>
           </div>
@@ -453,9 +627,26 @@ export default function CheckoutClient({
             <span className="font-medium">Total</span>
             <span className="font-heading text-2xl">{formatPrice(total, brand.currency, brand.locale)}</span>
           </div>
+          {/*
+            ⚠️ Le modèle annonçait ici « Livraison offerte avec DHL · expédiée
+            sous 24–48 h », en dur. Un transporteur nommé et un délai chiffré
+            sont des ENGAGEMENTS opposables : ils dépendent de la boutique, pas
+            du moteur. La phrase vient donc de `brand.shippingDetail`.
+          */}
           <p className="mt-4 flex items-center gap-2 rounded-xl bg-bg px-3 py-2.5 text-xs text-muted">
-            <span>🚚</span> Livraison offerte avec DHL · expédiée sous 24–48 h
+            {brand.shippingDetail}
           </p>
+
+          {/*
+            Réassurances au moment de payer : c'est l'écran où le doute coûte
+            le plus cher, et c'était le seul du tunnel à ne pas les porter.
+          */}
+          <div className="mt-6">
+            <Reassurances variant="compact" />
+          </div>
+          <div className="mt-5 flex justify-center">
+            <FrenchMark />
+          </div>
         </aside>
       </div>
     </div>
@@ -474,11 +665,41 @@ function SectionTitle() {
   );
 }
 
-function Field({ label, name, type = "text", full, autoComplete, placeholder }: { label: string; name: string; type?: string; full?: boolean; autoComplete?: string; placeholder?: string }) {
+function Field({
+  label,
+  name,
+  type = "text",
+  full,
+  onBlur,
+  autoComplete,
+  placeholder,
+  hint,
+}: {
+  label: string;
+  name: string;
+  type?: string;
+  full?: boolean;
+  onBlur?: (value: string) => void;
+  autoComplete?: string;
+  placeholder?: string;
+  /** Précision discrète à droite du libellé (« Pour la livraison »). */
+  hint?: string;
+}) {
   return (
     <label className={`block ${full ? "sm:col-span-2" : ""}`}>
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      <input name={name} type={type} required autoComplete={autoComplete} placeholder={placeholder} className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition placeholder:text-muted/50 focus:border-primary" />
+      <span className="mb-1 flex items-baseline justify-between gap-3">
+        <span className="text-xs font-medium text-muted">{label}</span>
+        {hint && <span className="text-[11px] text-muted/70">{hint}</span>}
+      </span>
+      <input
+        name={name}
+        type={type}
+        required
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        onBlur={onBlur ? (e) => onBlur(e.currentTarget.value) : undefined}
+        className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition placeholder:text-muted/50 focus:border-primary"
+      />
     </label>
   );
 }

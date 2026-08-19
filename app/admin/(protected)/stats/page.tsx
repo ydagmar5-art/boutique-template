@@ -1,6 +1,9 @@
 import LiveVisitors from "@/components/admin/LiveVisitors";
 import VisitorList from "@/components/admin/VisitorList";
 import StatsExplorer from "@/components/admin/StatsExplorer";
+import ConversionFunnel from "@/components/admin/ConversionFunnel";
+import SalesSources from "@/components/admin/SalesSources";
+import TopProduits from "@/components/admin/TopProduits";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,9 @@ export default function StatsPage() {
       <div className="space-y-6">
         <LiveVisitors />
         <StatsExplorer live />
+        <ConversionFunnel />
+        <TopProduits />
+        <SalesSources />
         <VisitorList />
       </div>
     </div>

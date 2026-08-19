@@ -44,7 +44,7 @@ create table if not exists public.{{prefix}}_visitors (
   ip         text,
   city       text,
   -- Origine du PREMIER contact (pinterest, snapchat, google, ia, direct…).
-  -- Jamais réécrite ensuite : c'est ce qui a fait venir le client.
+  -- Jamais réécrite ensuite : c'est ce qui a fait venir la cliente.
   source     text
 );
 

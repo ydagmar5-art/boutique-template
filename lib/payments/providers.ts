@@ -86,6 +86,27 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProvider> = {
       ],
     },
   },
+  mollie: {
+    id: "mollie",
+    name: "Mollie",
+    integration: "hosted-elements",
+    pciScope: "SAQ-A",
+    description:
+      "Champs carte Mollie Components, hébergés par Mollie en iframe et posés dans la page. Le 3-D Secure se fait chez Mollie, puis le client revient sur la boutique.",
+    docsUrl: "https://docs.mollie.com/docs/mollie-components",
+    webhookSigned: false,
+    fields: {
+      test: [
+        { key: "profileId", label: "Profile ID (pfl_…)" },
+        { key: "apiKey", label: "Clé API (test_…)", secret: true },
+      ],
+      live: [
+        { key: "profileId", label: "Profile ID (pfl_…)" },
+        { key: "apiKey", label: "Clé API (live_…)", secret: true },
+      ],
+    },
+  },
+
   zen: {
     id: "zen",
     name: "Zen.com",
@@ -109,24 +130,41 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProvider> = {
   },
   viva: {
     id: "viva",
-    name: "Viva Wallet",
-    integration: "hosted-checkout",
-    pciScope: "SAQ-A",
-    description: "Viva Smart Checkout. Création d'ordre + redirection sécurisée.",
-    docsUrl: "https://developer.viva.com/smart-checkout/",
-    webhookSigned: true,
+    name: "Viva.com",
+    integration: "hosted-elements",
+    /**
+     * ⚠️ SAQ A-EP, et c'est le SEUL PSP de la boutique dans ce cas avec Fondy.
+     * Le SDK Native Checkout v2 lit de vrais `<input>` de notre page — il
+     * n'y a pas d'iframe hébergée par Viva. La carte ne touche pas nos
+     * serveurs, mais elle passe par notre DOM : tout script tiers ajouté au
+     * tunnel pourrait la lire.
+     */
+    pciScope: "SAQ-A-EP",
+    description:
+      "Native Checkout v2 : champs carte intégrés à la page, 3-D Secure en surcouche, aucune redirection. L'ordre est créé côté serveur et le débit est déclenché avec un jeton de carte à usage unique.",
+    docsUrl: "https://developer.viva.com/apis-for-payments/",
+    /**
+     * ⚠️ false, contrairement à ce qui était déclaré auparavant : Viva ne signe
+     * PAS ses webhooks. La clé de vérification ne sert qu'à prouver la
+     * propriété de l'URL à l'enregistrement. La preuve d'encaissement vient de
+     * la relecture de la transaction avec nos clés.
+     */
+    webhookSigned: false,
+    functional: true,
     fields: {
       test: [
-        { key: "merchantId", label: "Merchant ID" },
+        { key: "merchantId", label: "Merchant ID (demo)" },
         { key: "apiKey", label: "Clé API (demo)", secret: true },
-        { key: "clientId", label: "Client ID (OAuth)" },
-        { key: "clientSecret", label: "Client secret (OAuth)", secret: true },
+        { key: "clientId", label: "Client ID (OAuth demo)" },
+        { key: "clientSecret", label: "Client secret (OAuth demo)", secret: true },
+        { key: "sourceCode", label: "Code source de paiement", hint: "4 chiffres" },
       ],
       live: [
-        { key: "merchantId", label: "Merchant ID" },
+        { key: "merchantId", label: "Merchant ID (live)" },
         { key: "apiKey", label: "Clé API (live)", secret: true },
-        { key: "clientId", label: "Client ID (OAuth)" },
-        { key: "clientSecret", label: "Client secret (OAuth)", secret: true },
+        { key: "clientId", label: "Client ID (OAuth live)" },
+        { key: "clientSecret", label: "Client secret (OAuth live)", secret: true },
+        { key: "sourceCode", label: "Code source de paiement", hint: "4 chiffres" },
       ],
     },
   },
@@ -154,19 +192,23 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProvider> = {
   whop: {
     id: "whop",
     name: "Whop",
-    integration: "redirect",
+    integration: "hosted-elements",
+    functional: true,
     pciScope: "SAQ-A",
-    description: "Whop Checkout. Lien de paiement hébergé + webhooks.",
+    description:
+      "Checkout embarqué : le formulaire de carte est monté par Whop dans une iframe, le client ne quitte pas la boutique. Le montant est créé à la volée au prix exact du panier — remises, articles multiples et produits ajoutés dans l'admin sont pris en charge sans créer de plan chez Whop.",
     docsUrl: "https://docs.whop.com/",
     webhookSigned: true,
     fields: {
       test: [
         { key: "apiKey", label: "Clé API (test)", secret: true },
         { key: "webhookSecret", label: "Secret de webhook", secret: true },
+        { key: "productId", label: "Produit Whop (prod_…)", hint: "Produit auquel rattacher les plans créés à la volée" },
       ],
       live: [
         { key: "apiKey", label: "Clé API (live)", secret: true },
         { key: "webhookSecret", label: "Secret de webhook", secret: true },
+        { key: "productId", label: "Produit Whop (prod_…)", hint: "Produit auquel rattacher les plans créés à la volée" },
       ],
     },
   },

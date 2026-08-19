@@ -56,6 +56,19 @@ export interface Promotion {
   /** Nombre maximum d'utilisations, toutes commandes confondues. */
   usageLimit?: number;
   usageCount?: number;
+  /**
+   * Code utilisable une seule fois PAR CLIENTE (identifiée par son e-mail),
+   * et non une seule fois au total.
+   *
+   * ⚠️ Ne pas confondre avec `usageLimit: 1`, qui brûlerait le code dès la
+   * première commande, pour tout le monde. C'est exactement le piège d'un
+   * code de bienvenue envoyé à chaque nouvelle inscrite.
+   *
+   * La liste des codes déjà consommés est fournie à `applyPromotions` par
+   * `validateCart`, qui la lit dans l'historique des commandes — cette
+   * fonction-ci reste pure.
+   */
+  oncePerCustomer?: boolean;
 }
 
 /** Ligne de panier enrichie de sa catégorie, pour le ciblage. */
@@ -185,6 +198,12 @@ export function applyPromotions(
   promotions: Promotion[],
   code?: string,
   now = new Date(),
+  /**
+   * Codes déjà consommés par CETTE cliente, en majuscules. Renseigné par
+   * `validateCart` à partir de son historique de commandes ; vide tant
+   * qu'elle n'a pas saisi son e-mail au paiement.
+   */
+  codesDejaUtilises: string[] = [],
 ): CartTotals {
   const subtotal = sum(lines);
   const live = promotions.filter((p) => isLive(p, now));
@@ -211,6 +230,11 @@ export function applyPromotions(
       codeError = "Ce code promo n'existe pas.";
     } else if (!isLive(promo, now)) {
       codeError = "Ce code promo n'est plus valable.";
+    } else if (
+      promo.oncePerCustomer &&
+      codesDejaUtilises.includes(normalise(promo.code!))
+    ) {
+      codeError = "Ce code a déjà été utilisé avec cette adresse e-mail.";
     } else {
       // Le code porte sur ce qu'il reste à payer après l'offre automatique.
       const amount = discountOf(promo, lines, subtotal - (auto?.amount ?? 0));

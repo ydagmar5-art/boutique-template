@@ -1,9 +1,11 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { hasSupabase, supabaseAdmin } from "@/lib/supabase/server";
 import { listOrders } from "@/lib/actions/orders";
+import { listProducts } from "@/lib/actions/products";
 import { store } from "@/config/store.config";
+import { isBotUserAgent } from "@/lib/analytics/bots";
 
 const VISITS = store.db.visits;
 const VISITORS = store.db.visitors;
@@ -11,11 +13,15 @@ const VISITORS = store.db.visitors;
 /*
   ⚠️ TOLÉRANCE À LA COLONNE `source` MANQUANTE.
 
-  PostgREST REJETTE toute la requête quand on écrit dans une colonne
-  inconnue. Sur une boutique dont la migration n'a pas encore été jouée, le
-  suivi des visites s'arrêterait NET et en silence — pour un simple ornement
-  d'affichage. On tente donc avec l'origine, et on se désarme une fois pour
-  toutes en cas de refus.
+  L'origine du visiteur est arrivée après la création de la table. Sur une
+  base déjà en service, la colonne n'existe qu'une fois la migration passée
+  (voir `supabase/schema.sql`) — et PostgREST REJETTE toute la requête quand
+  on écrit dans une colonne inconnue. Sans ce garde-fou, une boutique dont la
+  migration n'a pas encore été jouée cesserait purement et simplement
+  d'enregistrer ses visites : une panne silencieuse pour un simple ornement
+  d'affichage.
+
+  On tente donc AVEC l'origine, et on retombe sans elle une fois pour toutes.
 */
 let colonneSource = true;
 
@@ -33,6 +39,30 @@ async function geoFromHeaders(): Promise<{ ip?: string; city?: string }> {
   }
 }
 
+/**
+ * Faut-il ignorer ce passage ?
+ *
+ * Deux motifs, tous deux vérifiés CÔTÉ SERVEUR — le navigateur peut mentir :
+ *   · un agent utilisateur de robot ;
+ *   · la présence du cookie de session admin, c'est-à-dire le gérant en train
+ *     de parcourir sa propre boutique. Sans ça, chaque relecture de fiche
+ *     produit avant une correction gonflait ses propres statistiques.
+ *
+ * ⚠️ On teste la PRÉSENCE du cookie, pas sa validité : il ne s'agit pas d'un
+ * contrôle d'accès mais d'un filtre de mesure, et une signature expirée
+ * désigne quand même le navigateur du gérant.
+ */
+async function ignorer(): Promise<boolean> {
+  try {
+    const h = await headers();
+    if (isBotUserAgent(h.get("user-agent"))) return true;
+    const c = await cookies();
+    return c.has(store.cookies.session);
+  } catch {
+    return false;
+  }
+}
+
 /* ─────────── Tracking (appelé depuis le storefront) ─────────── */
 
 export async function trackVisit(
@@ -43,6 +73,7 @@ export async function trackVisit(
   source?: string,
 ): Promise<{ count: number; ip?: string; city?: string }> {
   if (path.startsWith("/admin") || !hasSupabase()) return { count: 0 };
+  if (await ignorer()) return { count: 0 };
   const sb = supabaseAdmin();
   let host: string | undefined;
   if (referrer) {
@@ -57,8 +88,9 @@ export async function trackVisit(
     .from(VISITS)
     .insert({ path, referrer: host, visitor, type: "view", ip, city });
   let existant: { count?: number; source?: string } | null = null;
-  /* `lu` et non `!existant` : un visiteur inconnu rend légitimement null, et
-     retester sur la nullité relancerait une requête à chaque première visite. */
+  /* ⚠️ `lu` et non `!existant` : une visiteuse inconnue rend légitimement
+     null, et retester sur la nullité relancerait une requête à chaque toute
+     première visite. */
   let lu = false;
   if (colonneSource) {
     const r = await sb
@@ -87,14 +119,16 @@ export async function trackVisit(
     city,
   };
   /* ⚠️ PREMIER CONTACT. `upsert` réécrit la ligne entière : sans cette garde,
-     chaque retour d'un client écraserait son origine par celle du jour, et
-     tout finirait attribué à « Direct ». */
+     chaque retour d'une cliente écraserait son origine par celle du jour, et
+     tout finirait attribué à « Direct ». L'origine déjà connue prime donc
+     toujours sur celle qui remonte du navigateur. */
   if (colonneSource && (existant?.source || source)) {
     ligne.source = existant?.source || source;
   }
 
   const { error } = await sb.from(VISITORS).upsert(ligne);
   if (error && colonneSource) {
+    // Migration pas encore jouée : on désarme et on réécrit sans l'origine.
     colonneSource = false;
     delete ligne.source;
     await sb.from(VISITORS).upsert(ligne);
@@ -108,6 +142,7 @@ export async function trackEvent(
   visitor: string,
 ): Promise<void> {
   if (!hasSupabase()) return;
+  if (await ignorer()) return;
   await supabaseAdmin().from(VISITS).insert({ path, visitor, type });
 }
 
@@ -123,7 +158,16 @@ export interface StatPoint {
 export interface StatsResult {
   totalViews: number;
   uniqueVisitors: number;
+  /** Nombre TOTAL d'ajouts au panier — un même visiteur peut en faire dix. */
   cartAdds: number;
+  /**
+   * Nombre de PERSONNES distinctes ayant ajouté au panier.
+   *
+   * ⚠️ Sans ce second chiffre, « 10 ajouts » est ambigu : dix personnes
+   * intéressées, ou une seule qui hésite. Ce sont deux situations opposées,
+   * et elles n'appellent pas les mêmes décisions.
+   */
+  cartVisitors: number;
   revenue: number;
   orders: number;
   series: StatPoint[];
@@ -135,6 +179,7 @@ const empty: StatsResult = {
   totalViews: 0,
   uniqueVisitors: 0,
   cartAdds: 0,
+  cartVisitors: 0,
   revenue: 0,
   orders: 0,
   series: [],
@@ -210,6 +255,7 @@ export async function getStats(fromISO: string, toISO: string): Promise<StatsRes
     totalViews: views.length,
     uniqueVisitors: new Set(views.map((r) => r.visitor)).size,
     cartAdds: carts.length,
+    cartVisitors: new Set(carts.map((r) => r.visitor).filter(Boolean)).size,
     revenue: orders.reduce((s, o) => s + o.total, 0),
     orders: orders.length,
     series,
@@ -231,14 +277,13 @@ export interface VisitorRow {
   lastSeen: string;
   ip: string;
   city: string;
-  /** Origine du PREMIER contact. Absente avant la migration. */
+  /** Origine du PREMIER contact. Absente avant la migration, ou pour les
+      visiteurs enregistrés avant sa mise en service. */
   source?: string;
 }
 
 export async function getVisitors(limit = 50): Promise<VisitorRow[]> {
   if (!hasSupabase()) return [];
-  /* ⚠️ Deux appels LITTÉRAUX : le client Supabase déduit le type depuis la
-     chaîne de sélection, une chaîne construite dynamiquement ne compile pas. */
   const sb = supabaseAdmin();
   let brut: unknown = null;
   if (colonneSource) {
@@ -247,7 +292,7 @@ export async function getVisitors(limit = 50): Promise<VisitorRow[]> {
       .select("id,count,last_path,last_seen,ip,city,source")
       .order("last_seen", { ascending: false })
       .limit(limit);
-    if (r.error) colonneSource = false;
+    if (r.error) colonneSource = false; // migration pas encore jouée
     else brut = r.data;
   }
   if (!brut) {
@@ -271,4 +316,213 @@ export async function getVisitors(limit = 50): Promise<VisitorRow[]> {
     city: v.city ?? "—",
     source: v.source ?? undefined,
   }));
+}
+
+/* ─────────── Entonnoir de conversion ─────────── */
+
+export interface FunnelStep {
+  key: "sessions" | "product" | "cart" | "checkout" | "purchase";
+  label: string;
+  /** Visiteurs DISTINCTS ayant atteint cette étape. */
+  visitors: number;
+  /** Part des sessions du haut de l'entonnoir. */
+  shareOfSessions: number;
+  /** Part de l'étape PRÉCÉDENTE — c'est là que se lisent les fuites. */
+  shareOfPrevious: number;
+}
+
+export interface FunnelResult {
+  steps: FunnelStep[];
+  /** Taux de conversion global : commandes / sessions. */
+  conversionRate: number;
+  /**
+   * Nombre de commandes réellement enregistrées sur la période.
+   * Sert de contrôle : il doit rester proche de l'étape « Commande passée ».
+   */
+  ordersRecorded: number;
+  /** Panier moyen, en centimes. */
+  averageOrderValue: number;
+}
+
+const emptyFunnel: FunnelResult = {
+  steps: [],
+  conversionRate: 0,
+  ordersRecorded: 0,
+  averageOrderValue: 0,
+};
+
+/**
+ * Entonnoir façon Shopify : sessions → fiche produit → panier → paiement →
+ * commande, compté en VISITEURS DISTINCTS à chaque étape.
+ *
+ * ⚠️ Aucune nouvelle collecte n'a été ajoutée : tout se déduit du journal de
+ * visites existant. Les étapes « fiche produit », « paiement » et « commande »
+ * se lisent dans les CHEMINS visités, l'ajout au panier dans les événements
+ * `cart_add` déjà émis par `lib/cart/store.ts`.
+ *
+ * ⚠️ L'étape « commande passée » est mesurée par la consultation de
+ * `/order/…`, donc par le NAVIGATEUR de l'acheteuse. Elle peut donc diverger
+ * du nombre réel de commandes : une cliente qui rouvre une ancienne
+ * confirmation est comptée, une qui vide son stockage local ne l'est pas.
+ * C'est pourquoi `ordersRecorded` expose le compte réel à côté — un écart
+ * important signale un problème de mesure, pas une baisse de ventes.
+ *
+ * ⚠️ Les étapes ne sont PAS strictement emboîtées : on ne vérifie pas qu'une
+ * même visiteuse a franchi les étapes dans l'ordre. Un taux supérieur à 100 %
+ * entre deux étapes est donc possible (rare) et signifie que des visiteuses
+ * sont entrées directement en cours de tunnel — par un lien de panier
+ * abandonné, par exemple.
+ */
+export async function getFunnel(
+  fromISO: string,
+  toISO: string,
+): Promise<FunnelResult> {
+  if (!hasSupabase()) return emptyFunnel;
+  const sb = supabaseAdmin();
+  const from = new Date(fromISO);
+  const to = new Date(toISO);
+
+  const { data } = await sb
+    .from(VISITS)
+    .select("path,type,visitor")
+    .gte("ts", from.toISOString())
+    .lte("ts", to.toISOString())
+    .limit(50000);
+  const rows = data ?? [];
+
+  /** Visiteurs distincts vérifiant un critère. */
+  const uniques = (
+    predicate: (r: { path: string | null; type: string | null }) => boolean,
+  ) =>
+    new Set(
+      rows
+        .filter((r) => predicate(r as { path: string | null; type: string | null }))
+        .map((r) => r.visitor)
+        .filter(Boolean),
+    ).size;
+
+  const isView = (t: string | null) => t === "view";
+
+  const sessions = uniques((r) => isView(r.type));
+  // `/products/<slug>` — la page de collection `/products` n'en fait pas partie.
+  const product = uniques(
+    (r) => isView(r.type) && !!r.path && /^\/products\/[^/]+/.test(r.path),
+  );
+  const cart = uniques((r) => r.type === "cart_add");
+  const checkout = uniques(
+    (r) => isView(r.type) && !!r.path && r.path.startsWith("/checkout"),
+  );
+  const purchase = uniques(
+    (r) => isView(r.type) && !!r.path && /^\/order\/[^/]+/.test(r.path),
+  );
+
+  const brut: { key: FunnelStep["key"]; label: string; visitors: number }[] = [
+    { key: "sessions", label: "Sessions", visitors: sessions },
+    { key: "product", label: "Fiche produit vue", visitors: product },
+    { key: "cart", label: "Ajout au panier", visitors: cart },
+    { key: "checkout", label: "Paiement atteint", visitors: checkout },
+    { key: "purchase", label: "Commande passée", visitors: purchase },
+  ];
+
+  const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0);
+
+  const steps: FunnelStep[] = brut.map((s, i) => ({
+    ...s,
+    shareOfSessions: pct(s.visitors, sessions),
+    shareOfPrevious: i === 0 ? 100 : pct(s.visitors, brut[i - 1].visitors),
+  }));
+
+  const allOrders = await listOrders();
+  const orders = allOrders.filter((o) => {
+    const t = new Date(o.date).getTime();
+    return t >= from.getTime() && t <= to.getTime() && o.status !== "refunded";
+  });
+  const revenue = orders.reduce((s, o) => s + o.total, 0);
+
+  return {
+    steps,
+    conversionRate: pct(purchase, sessions),
+    ordersRecorded: orders.length,
+    averageOrderValue: orders.length ? Math.round(revenue / orders.length) : 0,
+  };
+}
+
+/* ─────────── Palmarès produits ─────────── */
+
+export interface LigneProduit {
+  slug: string;
+  nom: string;
+  /** Ajouts au panier, tous visiteurs confondus. */
+  ajouts: number;
+  /** Personnes distinctes ayant ajouté ce modèle. */
+  personnes: number;
+  /** Unités vendues (commandes ni annulées ni remboursées). */
+  vendus: number;
+  /** Chiffre d'affaires du modèle, en centimes. */
+  ca: number;
+}
+
+/**
+ * Palmarès des modèles sur une période.
+ *
+ * ⚠️ Les ajouts au panier viennent des événements `cart_add`, dont le champ
+ * `path` porte le SLUG du produit (cf. `fireCartAdd` dans `lib/cart/store.ts`)
+ * — pas un chemin d'URL. Ne pas y appliquer les filtres prévus pour les vues.
+ *
+ * ⚠️ Les ventes viennent des commandes, pas des événements : un pixel peut
+ * être bloqué, une commande non. Les commandes annulées et remboursées sont
+ * exclues — encaisser puis rembourser n'est pas une vente.
+ */
+export async function getTopProduits(
+  fromISO: string,
+  toISO: string,
+): Promise<LigneProduit[]> {
+  const noms = new Map<string, string>();
+  for (const p of await listProducts()) noms.set(p.slug, p.name);
+
+  const par = new Map<string, LigneProduit>();
+  const ligne = (slug: string): LigneProduit => {
+    let l = par.get(slug);
+    if (!l) {
+      l = { slug, nom: noms.get(slug) ?? slug, ajouts: 0, personnes: 0, vendus: 0, ca: 0 };
+      par.set(slug, l);
+    }
+    return l;
+  };
+
+  // ── Ajouts au panier ──
+  if (hasSupabase()) {
+    const { data } = await supabaseAdmin()
+      .from(VISITS)
+      .select("path,visitor")
+      .eq("type", "cart_add")
+      .gte("ts", new Date(fromISO).toISOString())
+      .lte("ts", new Date(toISO).toISOString())
+      .limit(50000);
+    const visiteurs = new Map<string, Set<string>>();
+    for (const r of data ?? []) {
+      const slug = r.path as string | null;
+      if (!slug) continue;
+      ligne(slug).ajouts += 1;
+      if (!visiteurs.has(slug)) visiteurs.set(slug, new Set());
+      if (r.visitor) visiteurs.get(slug)!.add(r.visitor as string);
+    }
+    for (const [slug, set] of visiteurs) ligne(slug).personnes = set.size;
+  }
+
+  // ── Ventes ──
+  const debut = new Date(fromISO).getTime();
+  const fin = new Date(toISO).getTime();
+  for (const o of await listOrders()) {
+    if (o.status === "cancelled" || o.status === "refunded") continue;
+    const t = new Date(o.date).getTime();
+    if (Number.isFinite(t) && (t < debut || t > fin)) continue;
+    for (const it of o.items) {
+      const l = ligne(it.slug);
+      l.vendus += it.qty;
+      l.ca += it.unitPrice * it.qty;
+    }
+  }
+
+  return [...par.values()];
 }

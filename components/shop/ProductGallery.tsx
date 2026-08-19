@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import NextImage from "next/image";
 
 /**
  * Galerie de la fiche produit.
@@ -9,7 +10,11 @@ import { useEffect, useState } from "react";
  * le cadre, sans bande. Le 3/4 n'est pas arbitraire — c'est le format de sortie
  * le plus courant des photos du catalogue, qui tombent alors pile. Les photos
  * plus allongées (9/16) sont rognées en haut et en bas, ce qui reste sans
- * conséquence tant que le luminaire est cadré au centre.
+ * conséquence tant que le sac est cadré au centre.
+ *
+ * ⚠️ `next/image` : les vignettes du bas font 60 px de large et tiraient
+ * jusqu'ici le fichier de 1200 px — six fois par fiche. Elles réclament
+ * désormais leur vraie largeur.
  */
 export default function ProductGallery({
   images,
@@ -33,64 +38,75 @@ export default function ProductGallery({
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  /** Précharge les deux photos voisines : le clic suivant est instantané. */
-  useEffect(() => {
-    if (total < 2) return;
-    for (const i of [active + 1, active - 1]) {
-      const img = new Image();
-      img.src = images[(i + total) % total];
-    }
-  }, [active, images, total]);
+  /*
+    Le préchargement manuel des photos voisines a été retiré : il tirait le
+    fichier SOURCE (1200 px) alors que `next/image` sert une URL optimisée
+    différente — on payait donc le téléchargement deux fois sans jamais
+    réchauffer le bon cache. Les vignettes, elles, sont déjà chargées.
+  */
 
   if (!total) return null;
   const src = images[active];
 
   return (
     <div className="space-y-3">
-      <div className="group relative overflow-hidden rounded-[2rem] bg-surface">
+      <div className="group relative aspect-[3/4] overflow-hidden bg-surface">
         {/* Pas de `key` ni d'animation : le navigateur garde la photo précédente
             affichée le temps de décoder la suivante, sans clignotement. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <NextImage
           src={src}
           alt={active === 0 ? name : `${name} — photo ${active + 1}`}
-          loading="eager"
-          decoding="async"
-          className="aspect-[3/4] w-full object-cover"
+          fill
+          priority
+          sizes="(min-width: 768px) 50vw, 100vw"
+          className="object-cover"
         />
 
         {total > 1 && (
           <>
             <Arrow side="left" onClick={() => go(active - 1)} />
             <Arrow side="right" onClick={() => go(active + 1)} />
-            <span className="absolute bottom-4 right-4 z-20 rounded-full bg-bg/85 px-3 py-1 text-xs font-medium text-muted backdrop-blur">
+            <span className="absolute bottom-4 right-4 z-20 bg-bg/85 px-2.5 py-1 text-[0.62rem] uppercase tracking-[0.14em] text-muted backdrop-blur">
               {active + 1} / {total}
             </span>
           </>
         )}
       </div>
 
+      {/*
+        Vignettes : une grille plutôt qu'une rangée qui déborde. En largeur
+        fixe de 60 px et en `overflow-x-auto`, la dernière se retrouvait
+        coupée au bord de l'écran sur mobile — on ne voyait pas qu'elle
+        défilait, on croyait à un bug de mise en page.
+      */}
       {total > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        // Colonnes calculées d'après le NOMBRE de photos : un `grid-cols-6`
+        // fixe laissait une colonne vide sur les modèles qui n'en ont que 4
+        // ou 5, ce qui se lisait comme une image manquante.
+        <div
+          className="grid gap-2"
+          style={{
+            gridTemplateColumns: `repeat(${Math.min(total, 6)}, minmax(0, 1fr))`,
+          }}
+        >
           {images.map((img, i) => (
             <button
               key={img + i}
               onClick={() => setActive(i)}
               aria-label={`Voir la photo ${i + 1}`}
               aria-current={i === active}
-              className={`relative h-20 w-[60px] shrink-0 overflow-hidden rounded-lg border-2 bg-surface transition ${
+              className={`relative aspect-[3/4] overflow-hidden bg-surface transition ${
                 i === active
-                  ? "border-primary"
-                  : "border-transparent opacity-70 hover:opacity-100"
+                  ? "opacity-100 ring-1 ring-ink"
+                  : "opacity-55 hover:opacity-100"
               }`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <NextImage
                 src={img}
                 alt=""
-                loading="lazy"
-                decoding="async"
-                className="h-full w-full object-cover"
+                fill
+                sizes="(min-width: 768px) 90px, 60px"
+                className="object-cover"
               />
             </button>
           ))}
@@ -111,7 +127,11 @@ function Arrow({
     <button
       onClick={onClick}
       aria-label={side === "left" ? "Photo précédente" : "Photo suivante"}
-      className={`absolute top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-bg/85 text-lg text-ink shadow-soft backdrop-blur transition hover:bg-bg md:opacity-0 md:group-hover:opacity-100 ${
+      /*
+        Masquées sur mobile : elles se posaient en plein milieu du sac, et
+        les vignettes juste en dessous font déjà le travail au doigt.
+      */
+      className={`absolute top-1/2 z-20 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-bg/85 text-lg text-ink shadow-soft backdrop-blur transition hover:bg-bg md:flex md:opacity-0 md:group-hover:opacity-100 ${
         side === "left" ? "left-3" : "right-3"
       }`}
     >

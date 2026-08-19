@@ -23,14 +23,14 @@ export default function VisitorList() {
   }, []);
 
   return (
-    <div className="rounded-2xl border border-line bg-surface">
+    <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
       <div className="border-b border-line px-6 py-4">
         <h2 className="font-medium">Tous les visiteurs</h2>
       </div>
       {rows.length === 0 ? (
         <p className="px-6 py-8 text-sm text-muted">Aucun visiteur enregistré pour l&apos;instant.</p>
       ) : (
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[38rem] text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wider text-muted">
               <th className="px-6 py-3 font-medium">Visiteur</th>
@@ -89,8 +89,8 @@ const TEINTES: Partial<Record<SourceVente, string>> = {
 };
 
 function Origine({ source }: { source?: string }) {
-  // Visiteur enregistré avant la mise en service : un tiret est plus honnête
-  // qu'un « Direct » faux.
+  // Visiteur enregistré avant la mise en service : on n'invente pas une
+  // origine, un tiret est plus honnête qu'un « Direct » faux.
   if (!source) return <span className="text-muted">—</span>;
   const cle = source as SourceVente;
   const libelle = SOURCE_LABEL[cle] ?? source;

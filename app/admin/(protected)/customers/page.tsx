@@ -14,8 +14,8 @@ export default async function AdminCustomers() {
         <p className="text-sm text-muted">{customers.length} clients</p>
       </header>
 
-      <div className="overflow-hidden rounded-2xl border border-line bg-surface">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
+        <table className="w-full min-w-[38rem] text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wider text-muted">
               <th className="px-6 py-3 font-medium">Client</th>

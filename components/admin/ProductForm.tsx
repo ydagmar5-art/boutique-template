@@ -36,6 +36,8 @@ export default function ProductForm({
   const [material, setMaterial] = useState(product?.material ?? "");
   const [detail, setDetail] = useState(product?.detail ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
+  const [storyTitle, setStoryTitle] = useState(product?.story?.title ?? "");
+  const [storyBody, setStoryBody] = useState(product?.story?.body ?? "");
   const [images, setImages] = useState<string[]>(product?.images ?? []);
   const [featured, setFeatured] = useState(product?.featured ?? false);
   const [manageStock, setManageStock] = useState(product?.manageStock ?? false);
@@ -60,9 +62,12 @@ export default function ProductForm({
       name,
       tagline,
       price: Math.round(parseFloat(price || "0") * 100),
-      /* Vide ⇒ champ absent. Et on refuse une valeur qui ne serait pas
-         STRICTEMENT supérieure au prix : une remise nulle ou négative
-         afficherait « −0 % ». */
+      /*
+        Prix barré. Vide ⇒ champ absent du produit, donc aucun prix barré.
+        On refuse aussi une valeur qui ne serait pas STRICTEMENT supérieure
+        au prix courant : une remise nulle ou négative n'a pas de sens et
+        afficherait « −0 % ».
+      */
       ...(() => {
         const barre = Math.round(parseFloat(compareAt || "0") * 100);
         const courant = Math.round(parseFloat(price || "0") * 100);
@@ -72,6 +77,12 @@ export default function ProductForm({
       material,
       detail,
       description,
+      // ⚠️ `submit` reconstruit le produit de zéro : tout champ absent d'ici
+      // serait EFFACÉ à la première modification depuis le back-office.
+      story:
+        storyTitle.trim() || storyBody.trim()
+          ? { title: storyTitle.trim(), body: storyBody.trim() }
+          : undefined,
       images,
       featured,
       manageStock,
@@ -114,10 +125,14 @@ export default function ProductForm({
             value={compareAt}
             onChange={(e) => setCompareAt(e.target.value)}
           />
+          <p className="mt-1.5 text-xs text-muted">
+            Affiché barré à côté du prix. Doit être supérieur au prix, sinon il
+            est ignoré.
+          </p>
           <p className="mt-1.5 text-xs text-secondary">
-            En France, ce prix doit avoir été réellement pratiqué : la loi
-            impose le prix le plus bas des 30 derniers jours (art. L112-1-1).
-            Un ancien prix inventé est une pratique commerciale trompeuse.
+            Ce prix doit avoir été réellement pratiqué : la loi impose le prix
+            le plus bas des 30 derniers jours (art. L112-1-1). Un ancien prix
+            inventé est une pratique commerciale trompeuse.
           </p>
         </Label>
         <Label text="Catégorie">
@@ -141,6 +156,32 @@ export default function ProductForm({
       <Label text="Description">
         <textarea className={`${field} min-h-24`} value={description} onChange={(e) => setDescription(e.target.value)} />
       </Label>
+
+      <div className="rounded-2xl border border-line bg-surface p-5">
+        <p className="text-sm font-medium">Récit de la fiche produit</p>
+        <p className="mt-1 text-xs text-muted">
+          Affiché plus bas sur la fiche, après la description et les
+          réassurances. C&apos;est la partie qui donne envie une fois que le
+          client est rassuré. Laisser vide pour ne rien afficher.
+        </p>
+        <div className="mt-4 space-y-4">
+          <Label text="Titre du récit">
+            <input
+              className={field}
+              value={storyTitle}
+              placeholder="Ex. : Une couleur qui vit"
+              onChange={(e) => setStoryTitle(e.target.value)}
+            />
+          </Label>
+          <Label text="Texte du récit">
+            <textarea
+              className={`${field} min-h-28`}
+              value={storyBody}
+              onChange={(e) => setStoryBody(e.target.value)}
+            />
+          </Label>
+        </div>
+      </div>
 
       <ImageUploader value={images} onChange={setImages} />
 

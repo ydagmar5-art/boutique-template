@@ -33,19 +33,22 @@ export interface Order {
   /** Téléphone du destinataire, pour le livreur. */
   phone?: string;
   /**
-   * Référence de la transaction chez le PSP (`pi_…` chez Stripe, `int_…`
-   * chez Airwallex). Sert à rapprocher une commande d'un encaissement et à
-   * lui rattacher le suivi (cf. `lib/payments/tracking.ts`).
+   * Référence de la transaction chez le PSP (`pi_…` chez Stripe, `int_…` chez
+   * Airwallex). Sert à rapprocher une commande d'un encaissement et à lui
+   * rattacher le suivi (cf. `lib/payments/tracking.ts`).
    */
   pspRef?: string;
-  /** Canal d'acquisition, au PREMIER contact (cf. `lib/attribution.ts`). */
+  /**
+   * Origine de la visiteuse à sa PREMIÈRE venue (cf. `lib/attribution.ts`).
+   * Absent sur les commandes antérieures au 5 août 2026.
+   */
   source?: string;
-  /** Date ISO à laquelle le suivi a été transmis au PSP, si elle a abouti. */
-  trackingSentAt?: string;
   items: OrderItem[];
   address?: string;
   /** Renseigné au passage en « expédiée » (facultatif). */
   tracking?: OrderTracking;
+  /** Date ISO à laquelle le suivi a été transmis au PSP, si elle a abouti. */
+  trackingSentAt?: string;
   /**
    * Commande traitée : masquée de la liste admin par défaut.
    * N'affecte NI les statistiques NI le chiffre d'affaires.

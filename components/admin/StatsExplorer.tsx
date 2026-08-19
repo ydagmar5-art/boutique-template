@@ -58,7 +58,10 @@ export default function StatsExplorer({
   initial?: StatsResult;
   live?: boolean;
 }) {
-  const [preset, setPreset] = useState<PresetKey>("7d");
+  /* « Aujourd'hui » par défaut : c'est la question qu'on se pose en ouvrant
+     le tableau de bord. Le repasser à la main à chaque rechargement était
+     une friction quotidienne. */
+  const [preset, setPreset] = useState<PresetKey>("today");
   const today = dayStr(new Date());
   const weekAgo = dayStr(new Date(Date.now() - 6 * 864e5));
   const [from, setFrom] = useState(weekAgo);
@@ -85,7 +88,7 @@ export default function StatsExplorer({
   }, [preset, from, to, live]);
 
   const s = stats ?? {
-    totalViews: 0, uniqueVisitors: 0, cartAdds: 0, revenue: 0, orders: 0,
+    totalViews: 0, uniqueVisitors: 0, cartAdds: 0, cartVisitors: 0, revenue: 0, orders: 0,
     series: [], topPages: [], topReferrers: [],
   };
 
@@ -122,7 +125,13 @@ export default function StatsExplorer({
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Metric label="Vues" value={s.totalViews.toLocaleString("fr-FR")} />
         <Metric label="Visiteurs uniques" value={s.uniqueVisitors.toLocaleString("fr-FR")} />
-        <Metric label="Ajouts panier" value={s.cartAdds.toLocaleString("fr-FR")} />
+        <Metric
+          label="Ajouts panier"
+          value={s.cartAdds.toLocaleString("fr-FR")}
+          sous={`${s.cartVisitors.toLocaleString("fr-FR")} personne${
+            s.cartVisitors > 1 ? "s" : ""
+          }`}
+        />
         <Metric label="Commandes" value={s.orders.toLocaleString("fr-FR")} />
         <Metric
           label="Taux de conversion"
@@ -156,11 +165,21 @@ export default function StatsExplorer({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  sous,
+}: {
+  label: string;
+  value: string;
+  /** Précision affichée sous le chiffre, en petit. */
+  sous?: string;
+}) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-5">
       <p className="text-xs uppercase tracking-wider text-muted">{label}</p>
       <p className="mt-2 font-heading text-2xl">{value}</p>
+      {sous && <p className="mt-1 text-xs text-muted">{sous}</p>}
     </div>
   );
 }

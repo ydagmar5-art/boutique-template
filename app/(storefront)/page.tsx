@@ -1,398 +1,404 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
- * ║  PAGE D'ACCUEIL — implémentation de référence                    ║
+ * ║  PAGE D'ACCUEIL                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  *
- * Cette page est de la PEAU : elle se réécrit intégralement à chaque
- * boutique (« copie tel site », autre niche, autre discours). Rien ici
- * n'est sacré — sauf les quatre points ci-dessous.
+ * Direction « Galerie » : monochrome, blanc franc, aucun aplat de couleur.
+ * Le cuir est le seul élément coloré de la page.
  *
- * ⚠️ À CONSERVER quelle que soit la refonte :
- *   1. `listFeatured()` comme source des produits mis en avant — ne jamais
- *      écrire un catalogue en dur dans la page, l'admin ne le verrait pas.
- *   2. `<ProductCard>` pour chaque produit : il porte le lien vers la fiche
- *      et le formatage du prix selon la devise de la marque.
- *   3. Les ancres `id="histoire"` et `id="savoir-faire"` si `brand.nav` y
- *      renvoie — sinon les liens du menu tombent dans le vide.
+ * ⚠️ CONSERVÉ de l'implémentation de référence (ne pas retirer) :
+ *   1. `listFeatured()` comme source des modèles mis en avant — jamais de
+ *      catalogue en dur, sinon le back-office ne pilote plus rien.
+ *   2. `<ProductCard>` : porte le lien vers la fiche et le formatage du prix.
+ *   3. Les ancres `id="maison"` et `id="savoir-faire"`, visées par `brand.nav`.
  *   4. `<Reveal>` pour les apparitions au défilement : il respecte
- *      `prefers-reduced-motion`, une animation maison ne le fera pas.
+ *      `prefers-reduced-motion`.
  *
- * Structure actuelle (AIDA) : hero → réassurances → parti pris →
- * collection → histoire → savoir-faire → avis → CTA → newsletter.
- * Elle a fait ses preuves, mais elle n'est qu'un point de départ.
+ * ⚠️ RÈGLES DE CONTENU arrêtées avec le gérant :
+ *   · Le hero vient de `getHeroProduct()` — il se change depuis le tableau de
+ *     bord, sans toucher au code (le gérant fait de l'A/B test dessus).
+ *   · NE JAMAIS compter les modèles ni annoncer une amplitude de prix : le
+ *     catalogue bouge au gré de la production des ateliers.
+ *   · Aucun émoji nulle part.
+ *   · Les avis viennent de `lib/reviews.ts` et sont RÉELS.
+ *   · Le formulaire de lettre est BRANCHÉ (`lib/actions/newsletter.ts`) :
+ *     il enregistre l'adresse et déclenche l'e-mail de bienvenue. Ne pas le
+ *     remplacer par le champ décoratif du modèle.
  */
 import Link from "next/link";
+import Image from "next/image";
 import { brand } from "@/config/brand.config";
+import { LIGNES } from "@/lib/collections";
 import { listFeatured } from "@/lib/actions/products";
+import { getHeroProduct, getStorefrontSettings } from "@/lib/actions/storefront";
+import { formatPrice } from "@/lib/products";
+import { reviews, averageRating } from "@/lib/reviews";
 import ProductCard from "@/components/shop/ProductCard";
+import Price from "@/components/shop/Price";
 import Reassurances from "@/components/site/Reassurances";
 import Reveal from "@/components/site/Reveal";
 import PaymentBadges from "@/components/site/PaymentBadges";
+import NewsletterForm from "@/components/site/NewsletterForm";
+import FrenchMark from "@/components/site/FrenchMark";
+import OfferFilm from "@/components/site/OfferFilm";
+import MaisonSection from "@/components/site/MaisonSection";
+import JsonLd from "@/components/site/JsonLd";
+import { organisationJsonLd, siteJsonLd } from "@/lib/seo";
+import type { Metadata } from "next";
 
-function Stars({ className = "" }: { className?: string }) {
+/*
+  Canonique auto-référente. ⚠️ Elle n'est PAS décorative ici : les 346
+  épingles Pinterest pointent vers des adresses portant `?utm_source=…`,
+  que Google verrait sinon comme autant de pages distinctes affichant le
+  même contenu. La canonique les rattache toutes à l'adresse propre, sans
+  toucher ni aux liens ni à l'attribution.
+*/
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
+
+
+
+function Etoiles({ note, className = "" }: { note: number; className?: string }) {
   return (
-    <div className={`flex gap-0.5 text-primary ${className}`} aria-label="5 étoiles sur 5">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <span key={i}>★</span>
-      ))}
-    </div>
+    <span
+      className={`tracking-[0.15em] text-ink ${className}`}
+      aria-label={`${note} sur 5`}
+    >
+      {"★".repeat(Math.round(note))}
+      <span className="text-border">{"★".repeat(5 - Math.round(note))}</span>
+    </span>
   );
 }
 
 export default async function HomePage() {
-  const featured = await listFeatured();
+  const [featured, hero, reglages] = await Promise.all([
+    listFeatured(),
+    getHeroProduct(),
+    getStorefrontSettings(),
+  ]);
+  const note = averageRating();
+
 
   return (
     <>
-      {/* ░░ ATTENTION — HERO ░░ */}
-      <section className="grain relative overflow-hidden">
-        <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 pb-16 pt-12 sm:px-8 md:grid-cols-2 md:pb-24 md:pt-20">
-          <div className="animate-fade-up">
-            <div className="flex items-center gap-3">
-              <span className="h-px w-8 bg-primary" />
-              <span className="text-xs font-medium uppercase tracking-[0.3em] text-primary-dark">
-                {brand.name}
-              </span>
+      <JsonLd donnees={organisationJsonLd()} />
+      <JsonLd donnees={siteJsonLd()} />
+
+      {/* ░░ HERO ░░ */}
+      <section className="border-b border-line">
+        {/*
+          ░░ Deux heros, un par format ░░
+
+          DESKTOP : deux blocs de texte à gauche, le packshot à droite avec
+          son cartouche nom / accroche / prix. Placement EXPLICITE en grille
+          (`col-start` / `row-start`) plutôt qu'un `order`, qui ne saurait pas
+          regrouper les deux blocs de texte dans la même colonne.
+
+          MOBILE : titre, phrase d'accroche, appels à l'action. Ni packshot ni
+          film — le CARTOUCHE nom + accroche + PRIX est écarté parce qu'il est
+          la signature visuelle d'une fiche article, et le film de campagne a
+          été retiré parce qu'il repoussait le premier bouton sous la ligne de
+          flottaison.
+
+          ⚠️ Le bloc packshot ne se charge QUE sur desktop (`hidden md:block`,
+          porté par le lien lui-même) : sur mobile il n'existe pas du tout,
+          plutôt que d'être masqué après coup.
+        */}
+        <div className="mx-auto max-w-6xl px-5 sm:px-8">
+          <div className="grid gap-y-9 py-11 md:grid-cols-[0.95fr_1.05fr] md:content-center md:gap-x-16 md:py-20 lg:gap-x-24">
+            <div className="order-1 animate-fade-up md:col-start-1 md:row-start-1 md:self-end">
+              <FrenchMark />
+              <h1 className="mt-6 font-heading text-[2.4rem] font-light leading-[1.1] tracking-[-0.015em] text-balance sm:text-5xl lg:text-[3.6rem]">
+                Le cuir se juge
+                <br />
+                à ce qu&apos;il devient.
+              </h1>
             </div>
-            <h1 className="mt-6 font-heading text-5xl leading-[1.05] text-balance sm:text-6xl md:text-7xl">
-              La promesse qui <em className="text-primary not-italic">accroche</em>{" "}
-              le regard
-            </h1>
-            <p className="mt-6 max-w-md text-lg leading-relaxed text-muted">
-              Une phrase qui dit ce que le client obtient concrètement, et pour
-              qui c&apos;est fait. Pas ce que vous vendez — ce que ça change
-              pour lui.
-            </p>
-            <div className="mt-8 flex flex-wrap items-center gap-4">
+
+            {hero && (
               <Link
-                href="/products"
-                className="rounded-full bg-ink px-8 py-4 text-sm font-medium text-bg transition-all duration-300 hover:scale-[0.98] hover:bg-primary-dark"
+                href={`/products/${hero.slug}`}
+                /* `hidden md:block` sur le LIEN lui-même : ne laisser que son
+                   contenu masqué garderait une zone cliquable vide et une
+                   animation inutile dans la grille mobile. */
+                className="group order-3 hidden animate-fade-up md:col-start-2 md:row-start-1 md:row-span-2 md:block md:self-center [animation-delay:120ms]"
               >
-                Découvrir la collection
-              </Link>
-              <Link
-                href="/#histoire"
-                className="text-sm font-medium text-ink underline-offset-4 transition hover:text-primary-dark hover:underline"
-              >
-                Notre histoire →
-              </Link>
-            </div>
-            <div className="mt-8 flex items-center gap-3">
-              <Stars />
-              <span className="text-sm text-muted">
-                Preuve sociale — à remplacer par un chiffre vrai
-              </span>
-            </div>
-          </div>
-
-          <div className="relative animate-fade-up [animation-delay:150ms]">
-            <div className="absolute -right-10 -top-10 h-64 w-64 animate-glow rounded-full bg-halo blur-3xl" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/products/demo-un-1.svg"
-              alt="Visuel principal de la boutique"
-              className="relative z-10 aspect-[4/5] w-full rounded-[2rem] object-cover shadow-soft"
-            />
-            <div className="absolute -bottom-6 -left-6 z-20 rounded-2xl border border-line bg-bg/95 px-5 py-4 shadow-glow backdrop-blur">
-              <p className="font-heading text-lg">Modèle Un</p>
-              <p className="text-xs font-medium tracking-wide text-primary-dark">
-                Produit mis en avant
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ░░ RÉASSURANCES ░░ */}
-      <section className="border-y border-line bg-surface/60">
-        <div className="mx-auto max-w-6xl px-5 py-7 sm:px-8">
-          <Reassurances />
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-line pt-5">
-            <span className="text-xs uppercase tracking-wider text-muted">
-              Paiement 100 % sécurisé
-            </span>
-            <PaymentBadges />
-          </div>
-        </div>
-      </section>
-
-      {/* ░░ INTÉRÊT — LE PARTI PRIS (éditorial) ░░ */}
-      <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-28">
-        <div className="grid gap-12 md:grid-cols-[0.85fr_1.15fr] md:gap-20">
-          <Reveal>
-            <p className="text-sm font-medium uppercase tracking-[0.25em] text-primary-dark">
-              Le parti pris
-            </p>
-            <h2 className="mt-4 font-heading text-4xl leading-tight md:text-5xl">
-              La conviction qui vous distingue.
-            </h2>
-            <p className="mt-6 leading-relaxed text-muted">
-              Deux phrases sur ce qui vous sépare des concurrents. Un avis
-              tranché convainc mieux qu&apos;une liste de qualités.
-            </p>
-          </Reveal>
-
-          <div>
-            {[
-              [
-                "I",
-                "Premier argument",
-                "Le bénéfice le plus fort, formulé du point de vue du client. Concret, vérifiable, pas un superlatif.",
-              ],
-              [
-                "II",
-                "Deuxième argument",
-                "Ce qui rassure sur la qualité : matière, procédé, contrôle. Un détail précis vaut mieux qu'une promesse vague.",
-              ],
-              [
-                "III",
-                "Troisième argument",
-                "Ce qui lève la dernière objection : garantie, retour, service. C'est souvent lui qui déclenche l'achat.",
-              ],
-            ].map(([num, title, desc], i) => (
-              <Reveal
-                key={title}
-                delay={i * 90}
-                className="flex gap-6 border-t border-line py-7 first:border-t-0 first:pt-0 last:pb-0"
-              >
-                <span className="font-heading text-xl italic text-primary-dark">
-                  {num}
-                </span>
-                <div>
-                  <h3 className="font-heading text-xl">{title}</h3>
-                  <p className="mt-2 leading-relaxed text-muted">{desc}</p>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ░░ DÉSIR — COLLECTION ░░ */}
-      <section className="border-t border-line bg-surface/40">
-        <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-28">
-          <div className="mb-12 flex items-end justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-[0.25em] text-primary-dark">
-                Les plus désirées
-              </p>
-              <h2 className="mt-2 font-heading text-4xl md:text-5xl">
-                Nos produits phares
-              </h2>
-            </div>
-            <Link
-              href="/products"
-              className="hidden whitespace-nowrap text-sm font-medium text-ink underline-offset-4 hover:text-primary-dark hover:underline sm:block"
-            >
-              Tout voir →
-            </Link>
-          </div>
-          <div className="grid gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
-            {featured.map((p, i) => (
-              <Reveal key={p.slug} delay={(i % 3) * 80}>
-                <ProductCard product={p} />
-              </Reveal>
-            ))}
-          </div>
-          <div className="mt-12 text-center sm:hidden">
-            <Link
-              href="/products"
-              className="inline-block rounded-full bg-ink px-8 py-3.5 text-sm font-medium text-bg hover:bg-primary-dark"
-            >
-              Voir toute la collection
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ░░ DÉSIR — NOTRE HISTOIRE ░░ */}
-      <section id="histoire" className="scroll-mt-20 border-t border-line">
-        <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-28">
-          <div className="grid gap-12 md:grid-cols-[1fr_1.1fr] md:items-center">
-            <Reveal>
-              <p className="text-sm font-medium uppercase tracking-[0.25em] text-primary-dark">
-                Notre histoire
-              </p>
-              <h2 className="mt-2 font-heading text-4xl md:text-5xl">
-                L&apos;histoire qui donne envie d&apos;acheter ici
-              </h2>
-              <div className="mt-6 space-y-4 leading-relaxed text-muted">
-                <p>
-                  Le récit de fondation : d&apos;où vient la marque, quel
-                  problème elle a voulu régler, pourquoi elle existe. C&apos;est
-                  la section qui transforme un vendeur anonyme en quelqu&apos;un
-                  à qui on fait confiance.
-                </p>
-                <p>
-                  Un deuxième paragraphe sur la façon de travailler
-                  aujourd&apos;hui. Rester concret : une histoire vraie et
-                  banale convainc mieux qu&apos;une légende trop lisse.
-                </p>
-              </div>
-              <div className="mt-8 flex gap-10">
-                {[
-                  ["20XX", "Année de création"],
-                  ["00", "Références au catalogue"],
-                  ["100%", "Argument chiffré"],
-                ].map(([v, k]) => (
-                  <div key={k}>
-                    <p className="font-heading text-2xl">{v}</p>
-                    <p className="text-xs uppercase tracking-wider text-muted">
-                      {k}
-                    </p>
+                {/* ── Desktop : packshot + cartouche ── */}
+                <div className="hidden md:block">
+                  <div className="relative aspect-[4/5] w-full overflow-hidden bg-surface">
+                    <Image
+                      src={hero.images[0]}
+                      alt={`${hero.name}, ${hero.tagline.toLowerCase()}`}
+                      fill
+                      priority
+                      sizes="55vw"
+                      className="object-cover transition-transform duration-[1200ms] ease-out group-hover:scale-[1.02]"
+                    />
                   </div>
-                ))}
+                  <div className="mt-4 flex items-end justify-between gap-4 border-t border-line pt-4">
+                    <div>
+                      <p className="text-[0.68rem] uppercase tracking-[0.22em] text-ink">
+                        {hero.name}
+                      </p>
+                      <p className="mt-1.5 text-[0.72rem] text-muted">
+                        {hero.tagline}
+                      </p>
+                    </div>
+                    <span className="whitespace-nowrap">
+                      <Price
+                        prix={hero.price}
+                        prixBarre={hero.compareAtPrice}
+                        taille="petit"
+                      />
+                    </span>
+                  </div>
+                </div>
+
+              </Link>
+            )}
+
+            {/*
+              Le film de campagne qui occupait cette place sur mobile a été
+              retiré : il poussait le texte et le premier appel à l'action
+              sous la ligne de flottaison, sur l'écran d'où vient l'essentiel
+              du trafic. Le film de l'offre, plus bas, reste en place.
+            */}
+
+            <div className="order-2 animate-fade-up md:col-start-1 md:row-start-2 md:self-start [animation-delay:60ms]">
+              <p className="max-w-md leading-[1.75] text-muted md:mt-7">
+                Des pièces coupées dans des cuirs pleine fleur, montées pour
+                tenir leur ligne des années. Nous ne dessinons pas pour une saison.
+              </p>
+
+              <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-4">
+                <Link
+                  href="/products"
+                  className="w-full bg-ink px-10 py-[1.15rem] text-center text-[0.66rem] uppercase tracking-[0.22em] text-bg transition-colors duration-300 hover:bg-primary-dark sm:w-auto"
+                >
+                  Découvrir la collection
+                </Link>
+                <Link
+                  href="/#maison"
+                  className="text-[0.66rem] uppercase tracking-[0.18em] text-ink underline decoration-1 underline-offset-[7px] transition-opacity hover:opacity-60"
+                >
+                  Notre histoire
+                </Link>
               </div>
+
+              <div className="mt-9 flex items-center gap-3 border-t border-line pt-6">
+                <Etoiles note={note} className="text-sm" />
+                <span className="text-[0.72rem] text-muted">
+                  {note.toString().replace(".", ",")} sur 5 — avis vérifiés
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ░░ RÉASSURANCES — juste après le hero ░░ */}
+      <section className="border-b border-line bg-surface">
+        <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8">
+          <Reassurances />
+        </div>
+      </section>
+
+      {/* ░░ LES LIGNES ░░ */}
+      <section className="border-b border-line">
+        <nav
+          aria-label="Les lignes de la collection"
+          className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-8 gap-y-3 px-5 py-6 sm:px-8"
+        >
+          {/* Vers les pages de LIGNE, pas vers un filtre : ce sont elles qui
+              portent le référencement des termes « cabas », « sac seau »… */}
+          {LIGNES.map((l) => (
+            <Link
+              key={l.slug}
+              href={`/collections/${l.slug}`}
+              className="text-[0.62rem] uppercase tracking-[0.24em] text-muted transition-colors hover:text-ink"
+            >
+              {l.nom}
+            </Link>
+          ))}
+        </nav>
+      </section>
+
+      {/* ░░ SÉLECTION ░░ */}
+      <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-28">
+        <div className="mb-14 max-w-xl">
+          <p className="text-[0.6rem] uppercase tracking-[0.3em] text-muted">
+            La sélection
+          </p>
+          <h2 className="mt-4 font-heading text-3xl font-light leading-tight md:text-4xl">
+            Les pièces que vous portez le plus.
+          </h2>
+        </div>
+        <div className="grid gap-x-6 gap-y-14 sm:grid-cols-2 lg:grid-cols-3">
+          {featured.map((p, i) => (
+            <Reveal key={p.slug} delay={(i % 3) * 80}>
+              <ProductCard product={p} />
             </Reveal>
-            <div className="relative">
-              <div className="absolute -left-8 -top-8 h-56 w-56 animate-glow rounded-full bg-halo blur-3xl" />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/products/demo-un-2.svg"
-                alt="Univers de la marque"
-                loading="lazy"
-                className="relative z-10 aspect-[4/5] w-full rounded-[2rem] object-cover shadow-soft"
+          ))}
+        </div>
+        <div className="mt-16 text-center">
+          <Link
+            href="/products"
+            className="text-[0.66rem] uppercase tracking-[0.18em] text-ink underline decoration-1 underline-offset-[7px] transition-opacity hover:opacity-60"
+          >
+            Voir toute la collection
+          </Link>
+        </div>
+      </section>
+
+      {/* ░░ LA MAISON ░░ — balisage dans `components/site/MaisonSection`,
+          partagé avec les fiches produit. `ancre` : l'accueil est la seule
+          page à porter `id="maison"`, cible du menu. */}
+      <MaisonSection maison={reglages.maison} ancre />
+
+      {/* ░░ L'OFFRE — film en fond, texte et échéance par-dessus ░░ */}
+      <OfferFilm deadline={reglages.offerDeadline} />
+
+      {/* ░░ SAVOIR-FAIRE ░░ */}
+      <section
+        id="savoir-faire"
+        className="scroll-mt-20 border-t border-line bg-surface"
+      >
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 sm:px-8 md:grid-cols-2 md:gap-16 md:py-28">
+          <Reveal>
+            <div className="relative aspect-square w-full overflow-hidden bg-bg">
+              <Image
+                src="/products/minuit-5.webp"
+                alt="Détail de piqûre sur le modèle Minuit"
+                fill
+                sizes="(min-width: 768px) 45vw, 100vw"
+                className="object-cover"
               />
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ░░ DÉSIR — SAVOIR-FAIRE ░░ */}
-      <section id="savoir-faire" className="scroll-mt-20 bg-ink text-bg">
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 sm:px-8 md:grid-cols-2 md:py-28">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/products/demo-deux-1.svg"
-            alt="Savoir-faire de la marque"
-            loading="lazy"
-            className="aspect-square w-full rounded-[2rem] object-cover"
-          />
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.25em] text-halo">
+          </Reveal>
+          <Reveal delay={90}>
+            <p className="text-[0.6rem] uppercase tracking-[0.3em] text-muted">
               Savoir-faire
             </p>
-            <h2 className="mt-3 font-heading text-4xl text-bg md:text-5xl">
-              Comment c&apos;est fabriqué
+            <h2 className="mt-4 font-heading text-3xl font-light leading-tight md:text-4xl">
+              Trois épreuves
+              <br />
+              avant d&apos;entrer en collection.
             </h2>
-            <p className="mt-6 leading-relaxed text-bg/70">
-              Le procédé, en langage simple. Cette section justifie le prix :
-              plus elle est précise et technique, plus elle travaille pour vous.
-            </p>
-            <div className="mt-8 space-y-5">
+            <div className="mt-10 space-y-7">
               {[
-                ["01", "Première étape", "Ce qui est choisi, et selon quel critère."],
-                ["02", "Deuxième étape", "Le geste ou le contrôle qui fait la différence."],
-                ["03", "Troisième étape", "Ce qui est vérifié avant l'expédition."],
+                [
+                  "I",
+                  "La tenue à vide",
+                  "Un sac se juge vide, jamais rempli. Posé sur une table, il doit garder sa ligne. S'il s'affaisse là, il s'affaissera à l'épaule dans six mois.",
+                ],
+                [
+                  "II",
+                  "La piqûre",
+                  "Points réguliers, fils arrêtés, aucune reprise visible dans les angles. C'est le seul endroit où le temps passé à la fabrication se lit à l'œil nu.",
+                ],
+                [
+                  "III",
+                  "La quincaillerie",
+                  "Un fermoir doit se fermer d'une main et rester fermé. Nous pesons le laiton : le poids du métal en dit plus long sur sa durée de vie que sa couleur.",
+                ],
               ].map(([n, t, d]) => (
-                <div key={n} className="flex gap-5 border-t border-bg/15 pt-5">
-                  <span className="font-heading text-2xl text-halo">{n}</span>
+                <div key={n} className="flex gap-7 border-t border-line pt-6">
+                  <span className="font-heading text-sm font-light text-muted">
+                    {n}
+                  </span>
                   <div>
-                    <p className="font-medium text-bg">{t}</p>
-                    <p className="text-sm text-bg/60">{d}</p>
+                    <p className="text-[0.7rem] uppercase tracking-[0.18em] text-ink">
+                      {t}
+                    </p>
+                    <p className="mt-2.5 text-sm leading-[1.75] text-muted">
+                      {d}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          </Reveal>
         </div>
       </section>
 
-      {/* ░░ DÉSIR — AVIS (éditorial) ░░ */}
+      {/* ░░ AVIS — réels, cf. lib/reviews.ts ░░ */}
       <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-28">
-        <Reveal className="flex flex-col items-center text-center">
-          <div className="flex items-center gap-3">
-            <Stars className="text-lg" />
-            <span className="font-heading text-2xl">0,0/5</span>
-          </div>
-          <p className="mt-2 text-sm text-muted">
-            Note réelle à renseigner — voir l&apos;avertissement ci-dessous
+        <Reveal className="mb-14 text-center">
+          <p className="text-[0.6rem] uppercase tracking-[0.3em] text-muted">
+            Elles l&apos;ont reçu
           </p>
+          <div className="mt-5 flex items-center justify-center gap-3">
+            <Etoiles note={note} className="text-lg" />
+            <span className="font-heading text-xl font-light">
+              {note.toString().replace(".", ",")} / 5
+            </span>
+          </div>
         </Reveal>
 
-        <div className="mt-14 grid gap-x-12 gap-y-10 md:grid-cols-3">
-          {[
-            // ⚠️ Des avis inventés sur une boutique en ligne sont une pratique
-            // commerciale trompeuse (art. L121-2 du code de la consommation).
-            // À remplacer par de VRAIS retours clients, ou à supprimer.
-            [
-              "Premier avis client — le verbatim brut convainc davantage qu'une phrase réécrite.",
-              "Prénom N.",
-              "Qualité ou ville",
-            ],
-            [
-              "Deuxième avis — celui qui lève une objection précise (le prix, la taille, le délai).",
-              "Prénom N.",
-              "Qualité ou ville",
-            ],
-            [
-              "Troisième avis — celui qui parle de la livraison et du service après-vente.",
-              "Prénom N.",
-              "Qualité ou ville",
-            ],
-          ].map(([quote, name, role], i) => (
+        <div className="grid gap-x-10 gap-y-12 md:grid-cols-3">
+          {reviews.map((r, i) => (
             <Reveal
-              key={name}
-              delay={i * 90}
-              className="border-t border-line pt-8 md:border-l md:border-t-0 md:pl-8 md:pt-0 md:[&:first-child]:border-l-0 md:[&:first-child]:pl-0"
+              key={r.author + r.title}
+              delay={(i % 3) * 80}
+              className="border-t border-line pt-7"
             >
-              <span className="font-heading text-5xl leading-none text-primary/40">
-                &ldquo;
-              </span>
-              <p className="mt-1 leading-relaxed text-ink/85">{quote}</p>
-              <p className="mt-6 text-sm font-medium">{name}</p>
-              <p className="text-xs text-muted">{role}</p>
+              <Etoiles note={r.rating} className="text-[0.7rem]" />
+              <p className="mt-4 text-[0.72rem] uppercase tracking-[0.16em] text-ink">
+                {r.title}
+              </p>
+              <p className="mt-3 text-sm leading-[1.75] text-muted">{r.body}</p>
+              <p className="mt-5 text-[0.68rem] uppercase tracking-[0.16em] text-muted">
+                {r.author}
+              </p>
             </Reveal>
           ))}
         </div>
       </section>
 
-      {/* ░░ ACTION — CTA DE CLÔTURE (éditorial) ░░ */}
-      <section className="border-y border-line bg-ink text-bg">
-        <Reveal className="mx-auto max-w-3xl px-5 py-20 text-center sm:px-8 md:py-28">
-          <span className="mx-auto block h-px w-10 bg-primary" />
-          <h2 className="mt-8 font-heading text-4xl leading-tight text-bg md:text-5xl">
-            La dernière invitation à passer commande.
-          </h2>
-          <p className="mx-auto mt-5 max-w-md text-bg/60">
-            Rappeler ici les garanties qui lèvent le frein final : livraison,
-            délai de retour, paiement sécurisé.
+      {/* ░░ LA LETTRE ░░ */}
+      <section className="border-t border-line bg-surface">
+        <Reveal className="mx-auto max-w-2xl px-5 py-16 text-center sm:px-8 md:py-20">
+          <p className="text-[0.6rem] uppercase tracking-[0.3em] text-muted">
+            La lettre
           </p>
-          <Link
-            href="/products"
-            className="mt-9 inline-block rounded-full bg-primary px-9 py-4 text-sm font-medium text-ink transition-all duration-300 hover:scale-[0.98] hover:bg-halo"
-          >
-            Voir la collection
-          </Link>
+          <h2 className="mt-5 font-heading text-2xl font-light leading-snug md:text-3xl">
+            Dix pour cent sur votre première pièce.
+          </h2>
+          <p className="mx-auto mt-5 max-w-md text-sm leading-relaxed text-muted">
+            Inscrivez-vous pour être prévenue en premier des nouvelles pièces
+            et des rééditions. Votre code de bienvenue arrive dans la foulée,
+            cumulable avec les offres en cours.
+          </p>
+          <div className="mt-9">
+            <NewsletterForm />
+          </div>
         </Reveal>
       </section>
 
-      {/* ░░ NEWSLETTER ░░ */}
-      <section className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
-        <div className="rounded-[2.5rem] border border-line bg-secondary/10 px-6 py-14 text-center md:px-16">
-          <h2 className="font-heading text-2xl md:text-3xl">
-            Rejoignez la newsletter
+      {/* ░░ CLÔTURE ░░ */}
+      <section className="border-t border-line">
+        <Reveal className="mx-auto max-w-2xl px-5 py-20 text-center sm:px-8 md:py-28">
+          <h2 className="font-heading text-3xl font-light leading-tight md:text-4xl">
+            Une pièce se choisit une fois.
           </h2>
-          <p className="mx-auto mt-3 max-w-md text-muted">
-            Ce qu&apos;on y reçoit, et pourquoi ça vaut une adresse e-mail.
-            ⚠️ Ce formulaire n&apos;est PAS branché : il faut encore le relier
-            à un service d&apos;e-mailing.
+          <p className="mx-auto mt-5 max-w-sm leading-relaxed text-muted">
+            Livraison offerte, quatorze jours pour changer d&apos;avis,
+            paiement sécurisé par 3-D Secure.
           </p>
-          <form className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row">
-            <input
-              type="email"
-              required
-              placeholder="Votre adresse e-mail"
-              className="flex-1 rounded-full border border-line bg-surface px-5 py-3.5 text-sm outline-none transition focus:border-primary"
-            />
-            <button
-              type="submit"
-              className="rounded-full bg-ink px-7 py-3.5 text-sm font-medium text-bg transition hover:bg-primary-dark"
-            >
-              S&apos;inscrire
-            </button>
-          </form>
-        </div>
+          <Link
+            href="/products"
+            className="mt-10 inline-block bg-ink px-10 py-[1.15rem] text-[0.66rem] uppercase tracking-[0.22em] text-bg transition-colors duration-300 hover:bg-primary-dark"
+          >
+            Voir la collection
+          </Link>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-line pt-8">
+            <span className="text-[0.6rem] uppercase tracking-[0.2em] text-muted">
+              Paiement sécurisé
+            </span>
+            <PaymentBadges />
+          </div>
+        </Reveal>
       </section>
     </>
   );

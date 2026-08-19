@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { brand } from "@/config/brand.config";
 import Legal from "@/components/site/Legal";
 
-export const metadata: Metadata = { title: "Conditions générales d'utilisation" };
+export const metadata: Metadata = {
+  title: "Conditions générales d'utilisation",
+  alternates: { canonical: "/cgu" },
+};
 
 export default function CGU() {
   const l = brand.legal;
@@ -57,6 +60,23 @@ export default function CGU() {
         L&apos;éditeur se réserve le droit de modifier les présentes CGU à tout
         moment. Les CGU applicables sont celles en vigueur à la date de
         consultation du site.
+      </p>
+
+      {/*
+        Clause ajoutée pour les mêmes raisons que l'article 10 des CGV : les
+        prestataires de paiement contrôlent la concordance entre le droit
+        désigné et le pays d'immatriculation, et ne regardent pas toujours la
+        même page. Les deux doivent donc dire la même chose.
+      */}
+      <h2>Droit applicable</h2>
+      <p>
+        Les présentes CGU sont régies par le{" "}
+        <strong>droit d&apos;Angleterre et du Pays de Galles</strong>, pays
+        d&apos;immatriculation de {l.operator}. Ce choix ne prive pas
+        l&apos;utilisateur consommateur résidant dans l&apos;Union européenne de
+        la protection que lui assurent les dispositions impératives de son pays
+        de résidence. Les ventes conclues sur le site relèvent, quant à elles,
+        des <a href="/cgv">Conditions générales de vente</a>.
       </p>
     </Legal>
   );

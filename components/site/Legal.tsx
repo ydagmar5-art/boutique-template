@@ -1,9 +1,23 @@
 import Link from "next/link";
 
-/** Habillage commun des pages légales (typographie "prose" maison). */
+/**
+ * Habillage commun des pages légales (typographie « prose » maison).
+ *
+ * ⚠️ La date de mise à jour est une CONSTANTE, pas `new Date()` : une page
+ * légale qui affiche « mis à jour aujourd'hui » à chaque visite ment sur sa
+ * propre ancienneté et se repère au premier coup d'œil.
+ *
+ * ⚠️ Elle doit être postérieure à l'immatriculation de l'exploitant. Le
+ * modèle affichait une date figée alors que l'exploitant a été
+ * immatriculée le 3 août 2026 : des conditions de vente antérieures à
+ * l'existence du vendeur sont un signal d'alarme pour un prestataire de
+ * paiement comme pour un client.
+ */
+const DERNIERE_MISE_A_JOUR = "Dernière mise à jour : 3 août 2026";
+
 export default function Legal({
   title,
-  updated = "Dernière mise à jour : avril 2026",
+  updated = DERNIERE_MISE_A_JOUR,
   children,
 }: {
   title: string;

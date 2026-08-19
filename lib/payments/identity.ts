@@ -57,7 +57,7 @@ export interface Identite {
  * ⚠️ Indispensable, pas cosmétique : plusieurs PSP (Fondy explicitement)
  * n'acceptent que des caractères latins non accentués dans ces champs, et
  * rejettent la requête entière sur un « é ». Or nous sommes une boutique
- * française : « Céleste », « Rue de l'Hôtel-de-Ville » sont la norme.
+ * française : « Rue de l'Hôtel-de-Ville », « Chloé » sont la norme.
  */
 export function sansAccent(texte: string): string {
   return texte

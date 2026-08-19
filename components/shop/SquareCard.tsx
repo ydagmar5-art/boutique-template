@@ -150,9 +150,8 @@ export default function SquareCard({
       </div>
       {message && <p className="mt-2 text-sm text-secondary">{message}</p>}
       <p className="mt-3 flex items-center gap-2 text-xs text-muted">
-        <span>🔒</span>
         Paiement chiffré par Square · vos données carte ne transitent jamais par
-        notre site.
+        ce site.
       </p>
     </div>
   );

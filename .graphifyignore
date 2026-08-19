@@ -1,0 +1,12 @@
+public/
+.next/
+node_modules/
+*.webp
+*.svg
+*.mp4
+*.jpg
+*.png
+*.md
+*.txt
+*.json
+*.sql

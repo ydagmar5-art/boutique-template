@@ -30,8 +30,13 @@ export const CARRIERS: { id: string; label: string; track?: string }[] = [
   { id: "other", label: "Autre transporteur" },
 ];
 
-/** Transporteur par défaut — le site annonce « Livraison offerte avec DHL ». */
-export const DEFAULT_CARRIER = "dhl";
+/**
+ * Transporteur par défaut, présélectionné à l'expédition dans le back-office.
+ * ⚠️ Doit rester cohérent avec `brand.shippingDetail`, qui annonce Colissimo
+ * au client au moment de payer : préremplir un autre transporteur enverrait
+ * un lien de suivi qui contredit la promesse faite au paiement.
+ */
+export const DEFAULT_CARRIER = "colissimo";
 
 export function carrierLabel(id: string): string {
   return CARRIERS.find((c) => c.id === id)?.label ?? id;

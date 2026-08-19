@@ -144,7 +144,7 @@ function checkoutParams(input: FondyCheckoutInput): Record<string, unknown> {
  *
  * ⚠️ Raison d'être : `reservation_data` n'est qu'un confort d'anti-fraude.
  * Un compte marchand configuré autrement, un caractère refusé, une évolution
- * de leur validation — et le client ne pourrait plus payer du tout. On
+ * de leur validation — et la cliente ne pourrait plus payer du tout. On
  * préfère encaisser sans le champ que perdre la vente.
  */
 async function avecRepliSansIdentite<T>(

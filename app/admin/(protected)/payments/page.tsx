@@ -20,7 +20,6 @@ export default async function AdminPayments() {
 
       <div className="mb-6 rounded-2xl border border-organic/30 bg-organic/10 p-5">
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 text-organic">🛡</span>
           <div className="text-sm">
             <p className="font-medium text-ink">Sécurité &amp; conformité PCI-DSS</p>
             <p className="mt-1 text-muted">

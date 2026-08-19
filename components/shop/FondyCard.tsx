@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { brand } from "@/config/brand.config";
 import type { OrderItem } from "@/lib/db/seed";
 import {
   createFondyToken,
@@ -199,16 +200,19 @@ export default function FondyCard({
             lang: "fr",
           },
           messages: { fr: FR },
-          // Palette AURA (Espresso / Lin / Ambre).
+          // Le widget Fondy est un iframe : il ne voit pas nos variables CSS,
+          // il faut lui passer les couleurs en dur. On les prend donc dans
+          // `brand.colors` plutôt que de figer une palette ici — sans ça, le
+          // formulaire de paiement garde les teintes de la boutique d'origine.
           css_variable: {
-            text: "#2A2420",
-            bg: "#FFFFFF",
-            bg2: "#FAF6EF",
-            blue: "#E4DACB",
-            red: "#F6F1E8",
-            success: "#D9954B",
-            btn_success: "#D9954B",
-            danger: "#BE6A47",
+            text: brand.colors.ink,
+            bg: brand.colors.bg,
+            bg2: brand.colors.surface,
+            blue: brand.colors.border,
+            red: brand.colors.halo,
+            success: brand.colors.primary,
+            btn_success: brand.colors.primary,
+            danger: brand.colors.secondary,
           },
         });
         if (cancelled) return;
@@ -272,9 +276,8 @@ export default function FondyCard({
         <p className="text-xs text-muted">Chargement du paiement sécurisé…</p>
       )}
       <p className="mt-3 flex items-center gap-2 text-xs text-muted">
-        <span>🔒</span>
         Paiement chiffré par Fondy · vos données carte ne transitent jamais par
-        notre site.
+        ce site.
       </p>
     </div>
   );

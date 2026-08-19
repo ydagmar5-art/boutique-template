@@ -96,7 +96,7 @@ export default function CartDrawer() {
         {lines.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
             <span className="inline-block h-3 w-3 animate-glow rounded-full bg-primary" />
-            <p className="text-muted">Votre panier attend sa première lumière.</p>
+            <p className="text-muted">Votre panier est encore vide.</p>
             <Link
               href="/products"
               onClick={close}

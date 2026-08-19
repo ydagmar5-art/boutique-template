@@ -91,6 +91,44 @@ export interface AirwallexIntent {
   amount: number;
   currency: string;
   status: string;
+  /**
+   * Coordonnées portées par l'intent.
+   *
+   * ⚠️ Indispensables pour Apple Pay : le bouton court-circuite le formulaire
+   * du site, donc nom, adresse et e-mail ne viennent PAS de nos champs mais de
+   * la fiche Apple, qu'Airwallex rattache à l'intent. Sans ça, un paiement
+   * Apple Pay créerait une commande sans destinataire.
+   */
+  contact?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+  };
+}
+
+/** Aplatit l'adresse Airwallex en une ligne, telle que la stocke la boutique. */
+function adresseDe(shipping: Record<string, any> | undefined): string {
+  const a = shipping?.address as Record<string, string> | undefined;
+  if (!a) return "";
+  return [a.street, a.postcode, a.city, a.country_code]
+    .map((v) => (v ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function contactDe(data: Record<string, any>): AirwallexIntent["contact"] {
+  const shipping = data?.order?.shipping as Record<string, any> | undefined;
+  const nom = [shipping?.first_name, shipping?.last_name]
+    .map((v) => (v ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return {
+    name: nom || undefined,
+    email: data?.customer?.email || shipping?.email || undefined,
+    phone: shipping?.phone_number || undefined,
+    address: adresseDe(shipping) || undefined,
+  };
 }
 
 /** Crée un PaymentIntent. `merchantOrderId` est notre référence interne. */
@@ -238,6 +276,7 @@ export async function airwallexGetIntent(
         amount: Math.round(Number(data.amount) * 100),
         currency: data.currency,
         status: data.status,
+        contact: contactDe(data),
       },
     };
   } catch (e) {
@@ -249,3 +288,39 @@ export async function airwallexGetIntent(
 
 /** Seul statut qui vaut encaissement. */
 export const AIRWALLEX_SUCCESS = "SUCCEEDED";
+
+/**
+ * Vérifie la signature d'un webhook Airwallex.
+ *
+ * Airwallex signe `timestamp + corps brut` en HMAC-SHA256 avec le secret du
+ * webhook, et transmet le résultat en hexadécimal dans `x-signature`, l'horodatage
+ * dans `x-timestamp`.
+ *
+ * ⚠️ Le corps doit être celui REÇU, octet pour octet. Un `JSON.parse` suivi d'un
+ * `JSON.stringify` réordonne les clés et change les espaces : la signature ne
+ * correspondrait plus, et tous les paiements seraient rejetés.
+ *
+ * ⚠️ Comparaison à temps constant : un `===` sur des chaînes s'arrête au premier
+ * octet différent, ce qui laisse deviner la signature attendue caractère par
+ * caractère en mesurant le temps de réponse.
+ */
+export function airwallexVerifyWebhook(
+  secret: string,
+  rawBody: string,
+  signature: string | null,
+  timestamp: string | null,
+): boolean {
+  if (!secret || !signature || !timestamp) return false;
+
+  const attendu = crypto
+    .createHmac("sha256", secret)
+    .update(timestamp + rawBody)
+    .digest("hex");
+
+  const a = Buffer.from(attendu, "utf8");
+  const b = Buffer.from(signature.trim().toLowerCase(), "utf8");
+  // `timingSafeEqual` exige des longueurs égales — la tester d'abord ne fuite
+  // rien de plus que la longueur, déjà publique.
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}

@@ -6,6 +6,12 @@ export interface ProductVariant {
   stock: number;
 }
 
+/** Section narrative de la fiche produit, sous la partie technique. */
+export interface ProductStory {
+  title: string;
+  body: string;
+}
+
 export interface Product {
   slug: string;
   name: string;
@@ -30,6 +36,15 @@ export interface Product {
   /** 2e caractéristique — libellé défini par `brand.productDetailLabel`. */
   detail: string;
   description: string;
+
+  /**
+   * Récit affiché APRÈS la fiche technique et les réassurances : il ne sert
+   * pas à informer mais à donner envie, une fois l'objection rationnelle
+   * levée. Facultatif — la section disparaît si le champ est absent.
+   * ⚠️ Éditable dans le back-office (`components/admin/ProductForm.tsx`) :
+   * un champ absent du formulaire serait effacé à la première modification.
+   */
+  story?: ProductStory;
   images: string[];
   variants: ProductVariant[];
   featured?: boolean;

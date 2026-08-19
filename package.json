@@ -1,8 +1,8 @@
 {
-  "name": "boutique-template",
+  "name": "romy",
   "version": "1.0.0",
   "private": true,
-  "description": "Modèle de boutique e-commerce white-label — Next.js 15, Supabase, hub multi-PSP, back-office intégré.",
+  "description": "Boutique Maison Romy Paris",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,6 +14,7 @@
     "@stripe/react-stripe-js": "^6.8.0",
     "@stripe/stripe-js": "^9.12.0",
     "@supabase/supabase-js": "^2.110.8",
+    "jquery": "^3.7.1",
     "next": "^15.5.19",
     "react": "19.0.0",
     "react-dom": "19.0.0",
@@ -22,6 +23,7 @@
     "zustand": "5.0.3"
   },
   "devDependencies": {
+    "@types/jquery": "^4.0.1",
     "@types/node": "22.10.7",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",

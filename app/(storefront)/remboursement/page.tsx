@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { brand } from "@/config/brand.config";
 import Legal from "@/components/site/Legal";
 
-export const metadata: Metadata = { title: "Conditions de remboursement" };
+export const metadata: Metadata = {
+  title: "Conditions de remboursement",
+  alternates: { canonical: "/remboursement" },
+};
 
 export default function Remboursement() {
   const l = brand.legal;
@@ -18,12 +21,45 @@ export default function Remboursement() {
 
       <h2>Comment exercer votre droit</h2>
       <p>
-        Pour exercer votre droit de rétractation, informez-nous de votre
-        décision par une déclaration dénuée d&apos;ambiguïté, par e-mail à{" "}
-        <a href={`mailto:${l.email}`}>{l.email}</a> ou par courrier à l&apos;adresse{" "}
-        {l.address}. Vous pouvez utiliser le modèle de formulaire de
-        rétractation, sans que cela soit obligatoire.
+        Informez-nous de votre décision par une déclaration dénuée
+        d&apos;ambiguïté, par e-mail à{" "}
+        <a href={`mailto:${l.email}`}>{l.email}</a> ou par courrier à{" "}
+        {l.operator}, {l.address}. Vous pouvez utiliser le modèle ci-dessous,
+        sans que ce soit obligatoire.
       </p>
+
+      {/*
+        ⚠️ Le formulaire type n'est pas décoratif : l'article R.221-1 du Code
+        de la consommation impose au vendeur de le METTRE À DISPOSITION. Le
+        modèle se contentait d'y faire allusion sans jamais le fournir.
+      */}
+      <h2>Formulaire type de rétractation</h2>
+      <p>
+        <em>
+          À compléter et renvoyer uniquement si vous souhaitez vous rétracter.
+        </em>
+      </p>
+      <blockquote>
+        À l&apos;attention de {l.operator}, {l.address} — {l.email}
+        <br />
+        <br />
+        Je vous notifie par la présente ma rétractation du contrat portant sur
+        la vente du bien ci-dessous :
+        <br />
+        <br />
+        Commandé le : ……………… / Reçu le : ………………
+        <br />
+        Numéro de commande : ………………
+        <br />
+        Nom du consommateur : ………………
+        <br />
+        Adresse du consommateur : ………………
+        <br />
+        <br />
+        Signature (uniquement en cas de notification sur papier) : ………………
+        <br />
+        Date : ………………
+      </blockquote>
 
       <h2>Retour des produits</h2>
       <p>
@@ -31,7 +67,16 @@ export default function Remboursement() {
         <strong>14 jours</strong> après nous avoir communiqué votre décision. Le
         produit doit être retourné dans son état et son emballage d&apos;origine,
         complet et non endommagé. Les frais directs de renvoi sont à votre
-        charge, sauf mention contraire.
+        charge.
+      </p>
+      <p>
+        <strong>
+          N&apos;expédiez pas votre retour avant de nous avoir écrit
+        </strong>{" "}
+        : l&apos;adresse de retour, qui n&apos;est pas celle du siège social,
+        vous est communiquée par e-mail dès réception de votre demande. Un colis
+        envoyé spontanément à une autre adresse risque de se perdre, et nous ne
+        pourrions alors pas le tracer.
       </p>
 
       <h2>Remboursement</h2>

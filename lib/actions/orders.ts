@@ -19,6 +19,7 @@ import {
   sendOrderCancelled,
   sendOrderRefunded,
 } from "@/lib/emails";
+import { sendTelegramSale } from "@/lib/telegram";
 import { pousserSuiviAuPsp } from "@/lib/payments/tracking";
 
 /**
@@ -40,6 +41,8 @@ async function remonterLeSuivi(order: Order): Promise<void> {
         await write(ORDERS, orders);
         revalidatePath(`/admin/orders/${order.id}`);
       }
+    } else {
+      console.info(`[suivi] ${order.id} → ${res.psp} : ${res.etat} (${"raison" in res ? res.raison : ""})`);
     }
   } catch (e) {
     console.warn("[suivi] remontée impossible", e);
@@ -76,12 +79,12 @@ export interface NewOrderInput {
   subtotal?: number;
   /** Remises retenues par le serveur (offre automatique et/ou code promo). */
   discounts?: AppliedDiscount[];
+  /** Origine de la visiteuse (cf. `lib/attribution.ts`). */
+  source?: string;
   /** Téléphone du destinataire. */
   phone?: string;
   /** Référence de la transaction chez le PSP. */
   pspRef?: string;
-  /** Origine de la visiteuse (cf. `lib/attribution.ts`). */
-  source?: string;
 }
 
 export async function createOrder(input: NewOrderInput): Promise<{ id: string }> {
@@ -147,10 +150,16 @@ export async function createOrder(input: NewOrderInput): Promise<{ id: string }>
   revalidatePath("/admin/orders");
   revalidatePath("/admin/customers");
 
-  // E-mails : confirmation (paiement accepté) au client + notification au gérant.
+  /*
+    Confirmation au client, notification au gérant, alerte Telegram.
+    ⚠️ `allSettled` et non `all` : le client a DÉJÀ été débité à ce stade.
+    Un e-mail refusé ou un bot Telegram retiré du groupe ne doivent jamais
+    faire échouer la création de la commande.
+  */
   await Promise.allSettled([
     sendOrderConfirmation(order),
     sendMerchantNewOrder(order),
+    sendTelegramSale(order),
   ]);
 
   return { id };

@@ -57,7 +57,7 @@ export default async function OrderDetail({
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         {/* Articles */}
-        <div className="rounded-2xl border border-line bg-surface">
+        <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
           <div className="border-b border-line px-6 py-4">
             <h2 className="font-medium">Articles</h2>
           </div>
@@ -66,7 +66,7 @@ export default async function OrderDetail({
               Détail des articles non disponible pour cette commande.
             </p>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[38rem] text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wider text-muted">
                   <th className="px-6 py-3 font-medium">Produit</th>
@@ -115,10 +115,10 @@ export default async function OrderDetail({
           <div className="rounded-2xl border border-line bg-surface p-6">
             <h2 className="mb-3 font-medium">Client</h2>
             <p className="text-sm">{order.customer}</p>
-            {/* Cliquable : un appui suffit pour appeler la cliente depuis le téléphone. */}
             <a href={`mailto:${order.email}`} className="block text-sm text-primary-dark hover:underline">
               {order.email}
             </a>
+            {/* Cliquable : un appui suffit pour appeler la cliente depuis le téléphone. */}
             {order.phone && (
               <a href={`tel:${order.phone.replace(/\s/g, "")}`} className="text-sm text-primary-dark hover:underline">
                 {order.phone}
@@ -132,26 +132,36 @@ export default async function OrderDetail({
             </p>
           </div>
           <TrackingCard id={order.id} tracking={order.tracking} />
+          {/* Preuve datée que le suivi est parti chez le processeur : c'est
+              cette trace qui sert de défense en cas de contestation. */}
+          {order.trackingSentAt && (
+            <p className="-mt-3 px-1 text-xs text-muted">
+              Suivi transmis à {order.psp} le{" "}
+              {new Date(order.trackingSentAt).toLocaleDateString("fr-FR")}
+            </p>
+          )}
           <div className="rounded-2xl border border-line bg-surface p-6">
             <h2 className="mb-3 font-medium">Paiement</h2>
             <p className="text-sm">
               Réglé via <span className="font-medium">{order.psp}</span>
             </p>
-            {/* Référence chez le PSP : rapproche la commande de l'encaissement,
-                et retrouve la transaction en cas de litige. */}
+            <p className="mt-1 text-sm text-muted">
+              {formatPrice(order.total, brand.currency, brand.locale)}
+            </p>
+            {/* Origine de la PREMIÈRE visite, pas du dernier clic — cf. lib/attribution.ts */}
+            {/* Référence chez le PSP : sert à rapprocher la commande de
+                l'encaissement, et à retrouver la transaction en cas de litige. */}
             {order.pspRef && (
-              <p className="mt-2 break-all font-mono text-xs text-muted">
+              <p className="mt-3 break-all font-mono text-xs text-muted">
                 {order.pspRef}
               </p>
             )}
             <p className="mt-3 border-t border-line pt-3 text-sm text-muted">
               Origine :{" "}
               <span className="text-ink">
-                {SOURCE_LABEL[(order.source ?? "direct") as SourceVente] ?? order.source}
+                {SOURCE_LABEL[(order.source ?? "direct") as SourceVente] ??
+                  order.source}
               </span>
-            </p>
-            <p className="mt-1 text-sm text-muted">
-              {formatPrice(order.total, brand.currency, brand.locale)}
             </p>
           </div>
         </div>

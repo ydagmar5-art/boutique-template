@@ -60,8 +60,16 @@ export default function AddToCart({ product }: { product: Product }) {
 
   return (
     <div>
-      <div className="mb-6">
-        <p className="mb-3 text-sm font-medium text-muted">Finition</p>
+      {/*
+        Registre « Galerie » : angles droits, petites capitales espacées, un
+        seul bouton plein. Le modèle livrait deux boutons en contour à angles
+        arrondis — sur mobile, en pleine largeur, aucune action ne ressortait
+        et le vocabulaire jurait avec le reste du site.
+      */}
+      <div className="mb-7">
+        <p className="mb-3 text-[0.62rem] uppercase tracking-[0.22em] text-muted">
+          {brand.variantLabel}
+        </p>
         <div className="flex flex-wrap gap-2">
           {variants.map((v) => {
             const active = v.id === variantId;
@@ -70,15 +78,15 @@ export default function AddToCart({ product }: { product: Product }) {
                 key={v.id}
                 onClick={() => setVariantId(v.id)}
                 disabled={v.stock === 0}
-                className={`rounded-full border px-4 py-2 text-sm transition-all disabled:opacity-40 ${
+                className={`border px-4 py-2.5 text-[0.68rem] uppercase tracking-[0.14em] transition-colors disabled:opacity-40 ${
                   active
-                    ? "border-primary bg-halo/40 text-ink shadow-glow"
+                    ? "border-ink bg-ink text-bg"
                     : "border-line text-muted hover:border-ink hover:text-ink"
                 }`}
               >
                 {v.label}
                 {v.priceDelta > 0 && (
-                  <span className="ml-1 text-xs text-muted">
+                  <span className="ml-1.5 normal-case tracking-normal text-muted">
                     +{formatPrice(v.priceDelta, brand.currency, brand.locale)}
                   </span>
                 )}
@@ -88,7 +96,7 @@ export default function AddToCart({ product }: { product: Product }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-baseline gap-4 border-t border-line pt-6">
         {/* Le prix barré suit la variante : un supplément de coloris décale
             les deux montants du même écart, sinon la remise afficherait un
             pourcentage faux. */}
@@ -104,7 +112,7 @@ export default function AddToCart({ product }: { product: Product }) {
         />
         {managed && (
           <span
-            className={`text-sm ${inStock ? "text-organic" : "text-secondary"}`}
+            className={`text-[0.7rem] ${inStock ? "text-organic" : "text-secondary"}`}
           >
             {inStock ? `En stock · ${variant.stock} pièces` : "Épuisé"}
           </span>
@@ -115,14 +123,20 @@ export default function AddToCart({ product }: { product: Product }) {
         <button
           onClick={handleAdd}
           disabled={!inStock}
-          className="w-full rounded-full border border-ink bg-transparent py-4 text-sm font-medium text-ink transition-all hover:scale-[0.99] hover:bg-ink hover:text-bg disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full bg-ink py-[1.05rem] text-[0.66rem] uppercase tracking-[0.22em] text-bg transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {added ? "Ajouté au panier ✓" : "Ajouter au panier"}
+          {added ? "Ajouté au panier" : "Ajouter au panier"}
         </button>
         <button
           onClick={handleBuyNow}
           disabled={!inStock}
-          className="w-full rounded-full bg-primary py-4 text-sm font-medium text-ink transition-all hover:scale-[0.99] hover:bg-primary-dark hover:text-bg disabled:cursor-not-allowed disabled:opacity-40"
+          /*
+            ⚠️ Était `bg-primary text-ink` : sur une palette où `primary`
+            VAUT `ink` (marque monochrome), le libellé sortait noir sur noir.
+            Un bouton en contour ne dépend d'aucune relation entre deux
+            couleurs de la palette — il reste lisible quelle qu'elle soit.
+          */
+          className="w-full border border-ink bg-bg py-[1.05rem] text-[0.66rem] uppercase tracking-[0.22em] text-ink transition-colors hover:bg-ink hover:text-bg disabled:cursor-not-allowed disabled:opacity-40"
         >
           Acheter maintenant
         </button>

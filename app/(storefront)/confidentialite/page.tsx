@@ -2,23 +2,48 @@ import type { Metadata } from "next";
 import { brand } from "@/config/brand.config";
 import Legal from "@/components/site/Legal";
 
-export const metadata: Metadata = { title: "Politique de confidentialité" };
+export const metadata: Metadata = {
+  title: "Politique de confidentialité",
+  alternates: { canonical: "/confidentialite" },
+};
 
 export default function Confidentialite() {
   const l = brand.legal;
   return (
     <Legal title="Politique de confidentialité">
       <p>
-        La présente politique décrit la manière dont {brand.name} ({l.operator})
-        collecte et traite vos données personnelles, conformément au Règlement
-        général sur la protection des données (RGPD) et à la loi Informatique et
+        La présente politique décrit la manière dont {brand.name} PARIS,
+        boutique exploitée par {l.operator}, collecte et traite vos données
+        personnelles. La boutique s&apos;adressant à une clientèle résidant en
+        France, le Règlement général sur la protection des données (RGPD)
+        s&apos;applique à ces traitements, ainsi que la loi Informatique et
         Libertés.
       </p>
 
       <h2>Responsable du traitement</h2>
       <p>
-        {l.operator}, {l.address}. Contact :{" "}
+        {l.operator}, société immatriculée au registre {l.registry} sous le
+        numéro {l.registrationNumber}, dont le siège social est situé{" "}
+        {l.address}. Contact :{" "}
         <a href={`mailto:${l.email}`}>{l.email}</a>.
+      </p>
+      {/*
+        ⚠️ Mention indispensable depuis que l'exploitant est une société
+        britannique : les données quittent l'Espace économique européen. Le
+        Royaume-Uni bénéficie d'une décision d'adéquation de la Commission
+        européenne, ce qui rend le transfert licite sans garantie
+        supplémentaire — mais l'omettre serait un manquement à l'information.
+      */}
+      <h2>Lieu de traitement des données</h2>
+      <p>
+        Le responsable du traitement étant établi au Royaume-Uni, vos données y
+        sont traitées. Le Royaume-Uni fait l&apos;objet d&apos;une décision
+        d&apos;adéquation de la Commission européenne : ce transfert bénéficie
+        donc d&apos;un niveau de protection reconnu comme équivalent à celui de
+        l&apos;Union européenne, sans formalité supplémentaire de votre part.
+        Nos prestataires techniques (hébergement, envoi d&apos;e-mails, base de
+        données) traitent les données au sein de l&apos;Union européenne ou sous
+        garanties appropriées.
       </p>
 
       <h2>Données collectées</h2>
