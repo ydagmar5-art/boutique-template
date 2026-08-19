@@ -3,7 +3,7 @@
  * Crée une nouvelle boutique à partir du modèle.
  *
  *   node scripts/create-store.mjs --prefix meridian --name "Meridian" \
- *     --dir "/Users/…/Desktop/site web/meridian" [--order-prefix MRD-]
+ *     --dir "../meridian" [--order-prefix MRD-]
  *
  * Fait la partie MÉCANIQUE, celle qu'il ne faut pas retaper à la main :
  *   1. copie du modèle (sans node_modules, .next, .git, data, .env.local)
@@ -74,13 +74,21 @@ const orderPrefix = (args["order-prefix"] || prefix.slice(0, 3).toUpperCase() + 
 
 /* ─────────────────── 1. copie du modèle ─────────────────── */
 console.log(`\n▸ Copie du modèle vers ${dir}`);
-execFileSync("rsync", [
-  "-a",
-  "--exclude", "node_modules", "--exclude", ".next", "--exclude", ".git",
-  "--exclude", "data", "--exclude", ".env.local", "--exclude", ".vercel",
-  "--exclude", "tsconfig.tsbuildinfo",
-  `${TEMPLATE_DIR}/`, `${dir}/`,
-], { timeout: 120_000 });
+/*
+  ⚠️ `fs.cpSync` et NON `rsync` : rsync n'existe pas sur Windows, et la
+  première étape du script y échouait donc avant même de commencer.
+  L'API Node fonctionne à l'identique sur les trois systèmes.
+*/
+const EXCLUS = new Set([
+  "node_modules", ".next", ".git", "data", ".env.local", ".vercel",
+  "tsconfig.tsbuildinfo",
+]);
+fs.cpSync(TEMPLATE_DIR, dir, {
+  recursive: true,
+  // `filter` reçoit le chemin ABSOLU : on ne compare que le nom, sinon un
+  // dossier « data » imbriqué serait épargné et le vrai copié.
+  filter: (src) => !EXCLUS.has(path.basename(src)),
+});
 
 /* ─────────────────── 2. store.config.ts ─────────────────── */
 const cfgPath = path.join(dir, "config/store.config.ts");
