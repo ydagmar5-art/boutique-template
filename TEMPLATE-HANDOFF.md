@@ -11,7 +11,7 @@
 
 > Moteur e-commerce white-label. Next.js 15 (App Router, TS, Tailwind v3) · Supabase Postgres · Vercel.
 > **Ce dossier ne se déploie pas.** On le clone pour créer une boutique.
-> Origine : extrait d'AURA (atelier-aura-design.store) en juillet 2026, après validation en production.
+> Origine : extrait d'une boutique en production en juillet 2026, après validation en production.
 
 ## 0. À lire en premier
 
@@ -22,7 +22,7 @@
 **Règles de travail :**
 1. Après chaque modification : `npx tsc --noEmit` → `npm run build` → `vercel --prod --yes`.
 2. Vérifier dans le navigateur **en texte** (`get_page_text`, `read_page`, `javascript_tool`). Les captures d'écran coûtent cher — n'en prendre que pour un rendu visuel réellement en question.
-3. Commits en identité **ydagmar5-art**, jamais avec l'adresse personnelle du client.
+3. Commits sous l'identité git configurée pour la boutique, jamais l'adresse personnelle du client.
 4. Ne jamais annoncer qu'une chose fonctionne sans l'avoir constatée.
 
 ---
@@ -124,7 +124,7 @@ Le mode est **déduit** : config publique exploitable → `embedded`, sinon → 
 - 🔢 **Numérotation = plus grand numéro attribué + 1**, jamais « nombre de commandes + 1 » : le compte rejoue un numéro après chaque suppression. Deux commandes ont ainsi porté le même identifiant, dont l'une inaccessible et impossible à supprimer séparément.
 - **3-D Secure actif sur les trois PSP**, sans quitter le site : modale Stripe · modale ACS du widget Fondy · `payments.verifyBuyer()` chez Square. Si le défi échoue ou est abandonné, **on n'encaisse pas** — c'est voulu.
 - ✅ **Une seule passerelle active à la fois** (`saveGateway`) : en activer une éteint automatiquement les autres. L'ordre de `brand.payments` ne décide donc plus de rien — l'ancien piège « Test activé passe avant tout le monde » n'existe plus.
-- ✅ **Activation refusée si des clés manquent.** Sans repli possible (une seule passerelle), activer un PSP mal configuré coupe les ventes en silence : le client ne le découvre qu'au clic sur « Payer », avec un message « Clés … manquantes ». **C'est arrivé deux fois en production sur AURA.** `saveGateway` renvoie désormais `{ ok:false, error }` et la carte réaffiche l'interrupteur éteint. ⚠️ **Ne protège que les nouvelles activations** : une passerelle déjà active en base le reste.
+- ✅ **Activation refusée si des clés manquent.** Sans repli possible (une seule passerelle), activer un PSP mal configuré coupe les ventes en silence : le client ne le découvre qu'au clic sur « Payer », avec un message « Clés … manquantes ». **C'est arrivé deux fois en production.** `saveGateway` renvoie désormais `{ ok:false, error }` et la carte réaffiche l'interrupteur éteint. ⚠️ **Ne protège que les nouvelles activations** : une passerelle déjà active en base le reste.
 - ⚠️ **Clés test/live partagées** : `credentials` est un dictionnaire unique, mêmes noms de champs dans les deux onglets. Les clés live **écrasent** les clés test, et un champ laissé vide **conserve l'ancienne valeur** → oublier le secret de webhook live laisse celui de test et fait rejeter toutes les signatures. Remplir les champs d'un bloc.
 - ❌ **Stripe Embedded Checkout : essayé, refusé, ne pas y revenir.** Il impose un tunnel en deux étapes.
 
@@ -285,5 +285,5 @@ passage :
 - `seedOrders` et `seedCustomers` **volontairement vides** : une boutique neuve ne doit pas afficher de fausses commandes ni un faux chiffre d'affaires.
 - Le formulaire newsletter de la page d'accueil **n'est pas branché**.
 - Non implémentés, à décider par boutique : consentement cookies, favicon/image de partage, PSP restants.
-- **Remontées d'AURA (août 2026), vérifiées en local sur ce modèle** : produits masquables · uploader d'images glisser-déposer · galerie produit multi-photos · tunnel de paiement générique (registre) · Airwallex embarqué · Genome en redirection · une seule passerelle active à la fois + refus d'activation sans clés.
+- **Remontées d'une boutique en production (août 2026), vérifiées en local sur ce modèle** : produits masquables · uploader d'images glisser-déposer · galerie produit multi-photos · tunnel de paiement générique (registre) · Airwallex embarqué · Genome en redirection · une seule passerelle active à la fois + refus d'activation sans clés.
 - ⚠️ **Panier non revalidé côté serveur au paiement** : `startCheckout` fait confiance aux prix et aux articles envoyés par le navigateur. Un client peut modifier le total avant l'envoi, et un produit masqué déjà au panier reste commandable. Les PSP embarqués recomparent le montant encaissé au montant figé, ce qui limite la casse, mais **la vraie correction est de recalculer le panier depuis le catalogue serveur** — à faire.

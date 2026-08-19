@@ -23,12 +23,32 @@ import path from "node:path";
 
 const TEMPLATE_DIR = path.resolve(import.meta.dirname, "..");
 /**
- * ⚠️ Ce projet Supabase est PARTAGÉ : il héberge les boutiques ET d'autres
- * applications sans rapport. Toute requête SQL doit être limitée aux tables
- * du préfixe. Ne JAMAIS lancer de `drop`/`truncate` sans filtre de préfixe.
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║  RESSOURCES DE L'UTILISATEUR — rien n'est codé en dur ici        ║
+ * ╚══════════════════════════════════════════════════════════════════╝
+ *
+ * Ce script écrit dans VOTRE projet Supabase et sous VOTRE identité git.
+ * Les valeurs viennent donc de l'environnement, jamais du modèle : sans
+ * cela, un utilisateur qui clone ce dépôt créerait ses tables dans la base
+ * de quelqu'un d'autre.
+ *
+ * À définir une fois pour toutes dans votre shell (~/.zshrc) :
+ *
+ *   export BOUTIQUE_SUPABASE_PROJECT="<ref de votre projet>"
+ *   export BOUTIQUE_GIT_NAME="<votre nom git>"
+ *   export BOUTIQUE_GIT_EMAIL="<votre e-mail git>"
+ *   export BOUTIQUE_UPSTREAM="<url du modèle>"   # optionnel
+ *
+ * ⚠️ Un projet Supabase peut être PARTAGÉ entre plusieurs boutiques. Toute
+ * requête SQL doit alors être limitée aux tables du préfixe : ne JAMAIS
+ * lancer de `drop`/`truncate` sans filtre de préfixe.
  */
-const SUPABASE_PROJECT = "gzufvlflkpvemlyxljhn";
-const UPSTREAM = "https://github.com/ydagmar5-art/boutique-template.git";
+const SUPABASE_PROJECT = process.env.BOUTIQUE_SUPABASE_PROJECT || "";
+const UPSTREAM =
+  process.env.BOUTIQUE_UPSTREAM ||
+  "https://github.com/ydagmar5-art/boutique-template.git";
+const GIT_NAME = process.env.BOUTIQUE_GIT_NAME || "";
+const GIT_EMAIL = process.env.BOUTIQUE_GIT_EMAIL || "";
 
 /* ─────────────────────────── arguments ─────────────────────────── */
 const args = Object.fromEntries(
@@ -82,15 +102,30 @@ fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 /* ─────────────────── 4. tables Supabase ─────────────────── */
 console.log("▸ Création des tables Supabase");
 let token = "";
-try {
-  token = execFileSync("security", ["find-generic-password", "-s", "Supabase CLI", "-w"], {
-    encoding: "utf8",
-    timeout: 15_000,
-  }).trim();
-} catch {
-  console.warn("  ⚠ Jeton Supabase introuvable dans le trousseau — tables à créer à la main.");
+if (!SUPABASE_PROJECT) {
+  console.warn(
+    "  ⚠ BOUTIQUE_SUPABASE_PROJECT non défini — tables à créer à la main.\n" +
+      "    La référence du projet se lit dans son URL Supabase :\n" +
+      "    https://supabase.com/dashboard/project/<REF>",
+  );
+} else {
+  try {
+    // Jeton d'accès personnel Supabase. Le trousseau macOS est renseigné par
+    // `supabase login` ; la variable d'environnement sert aux autres systèmes.
+    token =
+      process.env.SUPABASE_ACCESS_TOKEN ||
+      execFileSync("security", ["find-generic-password", "-s", "Supabase CLI", "-w"], {
+        encoding: "utf8",
+        timeout: 15_000,
+      }).trim();
+  } catch {
+    console.warn(
+      "  ⚠ Jeton Supabase introuvable — lancez `supabase login`, ou définissez\n" +
+        "    SUPABASE_ACCESS_TOKEN. Tables à créer à la main en attendant.",
+    );
+  }
 }
-if (token) {
+if (token && SUPABASE_PROJECT) {
   const sql = fs
     .readFileSync(path.join(dir, "supabase/schema.sql"), "utf8")
     .replaceAll("{{prefix}}", prefix);
@@ -116,10 +151,11 @@ if (token) {
 const git = (...a) =>
   execFileSync("git", ["-C", dir, ...a], { stdio: "pipe", timeout: 30_000 });
 git("init", "-q");
-git("config", "user.name", "ydagmar5-art");
-// Adresse de non-réponse GitHub, en dur : `gh api user` demande le réseau,
-// peut rester bloqué sans jamais rendre la main, et n'apporte rien ici.
-git("config", "user.email", "283082545+ydagmar5-art@users.noreply.github.com");
+/* Identité git de la boutique. Renseignée seulement si l'utilisateur l'a
+   définie : sinon on laisse la configuration globale de sa machine, plutôt
+   que d'attribuer ses commits à quelqu'un d'autre. */
+if (GIT_NAME) git("config", "user.name", GIT_NAME);
+if (GIT_EMAIL) git("config", "user.email", GIT_EMAIL);
 // `upstream` = le modèle. C'est lui qui permettra plus tard de récupérer
 // un correctif du noyau : git fetch upstream && git merge upstream/main
 git("remote", "add", "upstream", UPSTREAM);
