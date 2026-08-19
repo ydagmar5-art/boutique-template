@@ -212,8 +212,11 @@ export const brand: BrandConfig = {
 
   // La typographie se change dans `config/fonts.ts` (imports statiques).
 
+  // ⚠️ « Boutique » est un libellé de repli : le remplacer par le mot que la
+  // clientèle emploie (« Sacs », « Bougies », « Bijoux »…). Un intitulé
+  // générique dessert le référencement comme la lisibilité.
   nav: [
-    { label: "Sacs", href: "/products" },
+    { label: "Boutique", href: "/products" },
     { label: "La Maison", href: "/#maison" },
     { label: "Savoir-faire", href: "/#savoir-faire" },
     { label: "Blog", href: "/blog" },

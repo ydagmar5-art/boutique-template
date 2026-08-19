@@ -43,19 +43,40 @@ export interface Ligne {
  * Exemple calé sur le catalogue de démonstration : à remplacer par les vraies
  * lignes de la boutique, une par famille de produits.
  */
+/**
+ * Lignes de produits — pages de catégorie visant les termes réellement
+ * cherchés, et maillage interne vers les fiches.
+ *
+ * ⚠️ `nom` doit correspondre EXACTEMENT au champ `collection` des produits
+ * (`lib/products.ts`). Sinon la page se construit VIDE, sans erreur ni
+ * avertissement : rien ne signale la faute de frappe.
+ *
+ * Les deux entrées ci-dessous sont calées sur le catalogue de démonstration.
+ * À remplacer par les vraies lignes de la boutique, une par famille.
+ */
 export const LIGNES: Ligne[] = [
   {
-    slug: "demonstration",
-    // ⚠️ Identique au champ `collection` des produits, sinon la page se
-    // construit vide, sans erreur ni avertissement.
-    nom: "Démonstration",
-    h1: "La ligne de démonstration",
-    titreSeo: "Ligne de démonstration — à remplacer",
+    slug: "signature",
+    nom: "Signature",
+    h1: "La ligne Signature",
+    titreSeo: "Ligne Signature — à réécrire avec le terme cherché",
     description:
-      "Page de catégorie d'exemple. La réécrire avec les termes que la clientèle tape réellement, et vérifier que `collection` correspond au catalogue.",
+      "Description affichée dans les résultats de recherche. La réécrire avec les mots que la clientèle tape réellement, sans bourrage.",
     intro: [
-      "Ce texte d'introduction se lit avant la grille de produits : y placer les mots que la clientèle tape réellement, sans bourrage.",
+      "Ce paragraphe se lit avant la grille de produits : il place les termes de recherche et dit à qui la ligne s'adresse.",
       "Un second paragraphe pour répondre à l'objection la plus fréquente sur cette famille de produits.",
+    ],
+  },
+  {
+    slug: "atelier",
+    nom: "Atelier",
+    h1: "La ligne Atelier",
+    titreSeo: "Ligne Atelier — à réécrire avec le terme cherché",
+    description:
+      "Seconde page de catégorie d'exemple, pour montrer le maillage entre lignes.",
+    intro: [
+      "Chaque ligne a sa page : c'est ce qui fait remonter les fiches vers des pages visant des termes plus larges.",
+      "Sans ces pages, une boutique n'existe que par ses fiches produit, et rate les recherches génériques.",
     ],
   },
 ];
