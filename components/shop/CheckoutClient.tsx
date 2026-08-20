@@ -539,7 +539,7 @@ export default function CheckoutClient({
             déjà dans le récapitulatif : la répéter ferait doublon et
             donnerait l'impression d'une double réduction.
           */}
-          {lines.length === 1 && lines[0].qty === 1 && (
+          {brand.offer.short && lines.length === 1 && lines[0].qty === 1 && (
             <Link
               href="/products"
               className="mb-5 block border border-line px-4 py-3 text-center text-[0.68rem] leading-relaxed text-muted transition-colors hover:border-ink"

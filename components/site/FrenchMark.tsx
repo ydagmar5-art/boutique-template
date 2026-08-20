@@ -1,3 +1,5 @@
+import { brand } from "@/config/brand.config";
+
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
  * ║  MENTION « MAISON FRANÇAISE »                                    ║
@@ -21,6 +23,22 @@
  * d'affaires — et c'est l'un des premiers signaux que cherchent les
  * prestataires de paiement à l'ouverture d'un compte.
  */
+
+/**
+ * ⚠️ MENTION MASQUÉE TANT QUE L'EXPLOITANT N'EST PAS RENSEIGNÉ.
+ *
+ * « Maison française » est une allégation sur l'origine de la MARQUE. Une
+ * boutique fraîchement clonée l'affichait pourtant dès le premier rendu,
+ * alors que `brand.legal.operator` valait encore « À RENSEIGNER » — et alors
+ * que l'exploitant peut très bien être immatriculé ailleurs qu'en France.
+ * C'est une affirmation invérifiable, et c'est l'un des premiers points que
+ * contrôlent la DGCCRF et les prestataires de paiement.
+ *
+ * Le garde ci-dessous ne vérifie QUE le renseignement, pas le pays : à
+ * l'exploitant d'une société étrangère de retirer ce composant de sa vitrine,
+ * ou de changer le `label` pour une mention exacte.
+ */
+const EXPLOITANT_RENSEIGNE = !brand.legal.operator.includes("À RENSEIGNER");
 
 function Drapeau({ className = "" }: { className?: string }) {
   return (
@@ -58,6 +76,8 @@ export default function FrenchMark({
   className?: string;
   label?: string;
 }) {
+  if (!EXPLOITANT_RENSEIGNE) return null;
+
   if (variant === "flag") {
     return (
       <span className={`inline-flex text-ink ${className}`} title={label}>

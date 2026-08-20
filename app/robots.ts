@@ -39,9 +39,27 @@ const ROBOTS_IA = [
   "Bingbot", // Copilot s'appuie sur l'index Bing
 ];
 
+/**
+ * ⚠️ MÊME INTERRUPTEUR QUE LA BALISE `noindex` — `NOINDEX=1`.
+ *
+ * `app/layout.tsx` pilotait déjà la balise meta avec cette variable, mais
+ * `robots.txt` l'ignorait : une boutique en préproduction demandait donc aux
+ * moteurs de ne pas l'indexer… tout en les invitant à l'explorer, sitemap
+ * compris. Les deux signaux doivent venir de la même source, sans quoi ils se
+ * contredisent — et c'est le plus permissif qui l'emporte en pratique.
+ *
+ * ⚠️ `robots.txt` demande de ne pas EXPLORER ; il n'empêche pas d'INDEXER une
+ * URL découverte par un lien entrant. Seule la balise `noindex` le fait. Les
+ * deux restent donc nécessaires.
+ */
 export default function robots(): MetadataRoute.Robots {
   const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   const interdits = ["/admin", "/admin/", "/checkout", "/order/"];
+
+  if (process.env.NOINDEX === "1") {
+    return { rules: [{ userAgent: "*", disallow: "/" }] };
+  }
+
   return {
     rules: [
       {

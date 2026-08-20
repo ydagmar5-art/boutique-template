@@ -202,11 +202,17 @@ export default async function ProductPage({
 
           {/* Rappel de l'offre à l'endroit qui compte : au moment où la
               cliente décide. */}
-          <p className="mt-5 border border-line px-4 py-3 text-center text-[0.68rem] leading-relaxed text-muted">
-            <span className="text-ink">{brand.offer.short}</span>
-            <br />
-            Appliquée automatiquement au panier.
-          </p>
+          {/* ⚠️ Affiché SEULEMENT si une offre existe. Sans ce garde, une
+              boutique sans promotion montrait un cadre vide surmontant
+              « Appliquée automatiquement au panier » — une promesse de remise
+              qui n'existe pas. */}
+          {brand.offer.short && (
+            <p className="mt-5 border border-line px-4 py-3 text-center text-[0.68rem] leading-relaxed text-muted">
+              <span className="text-ink">{brand.offer.short}</span>
+              <br />
+              Appliquée automatiquement au panier.
+            </p>
+          )}
 
           {/* Réassurances */}
           <div className="mt-8">
@@ -267,12 +273,17 @@ export default async function ProductPage({
         toucher les deux bords de l'écran. D'où les marges négatives, qui
         annulent le `px-5 sm:px-8` du parent.
       */}
+      {/* ⚠️ Masqué tant qu'aucune offre n'est configurée : sans ce garde, le
+          film s'affichait avec un sur-titre, un titre et un sous-titre VIDES,
+          soit une grande bande muette au milieu de la fiche. */}
+      {brand.offer.title && (
       <div className="-mx-5 mt-14 sm:-mx-8 md:mt-20">
         <OfferFilm
           cta="Ajouter une seconde pièce"
           deadline={reglages.offerDeadline}
         />
       </div>
+      )}
 
       {/* ░░ AVIS ░░ */}
       <section className="border-t border-line">

@@ -205,8 +205,10 @@ export function couperMeta(texte: string, maxi = 158): string {
  */
 export function descriptionProduit(p: Product): string {
   return couperMeta(
-    `${p.tagline}. ${p.material}, ${p.detail.toLowerCase()}. ` +
-      `${brand.shippingDetail}.`,
+    /* ⚠️ PAS de `.toLowerCase()` sur `detail` : il écrasait les unités et les
+       sigles — « 12 W LED » sortait en « 12 w led », « 260 mmHg » en
+       « 260 mmhg ». Le champ est saisi par le gérant, sa casse est voulue. */
+    `${p.tagline}. ${p.material}, ${p.detail}. ` + `${brand.shippingDetail}.`,
   );
 }
 
@@ -234,7 +236,10 @@ const TYPE_PAR_LIGNE: Record<string, string> = {
  * reviennent en cherchant la pièce par son nom.
  */
 export function titreProduit(p: Product): string {
-  const type = TYPE_PAR_LIGNE[p.collection] ?? "Sac";
+  /* ⚠️ Repli NEUTRE. Le modèle retombait sur « Sac », reste de la boutique
+     de maroquinerie dont il est extrait : toute boutique dont la collection
+     n'est pas déclarée ci-dessus titrait donc ses fiches « Sac … ». */
+  const type = TYPE_PAR_LIGNE[p.collection] ?? p.tagline;
   const couleur = p.variants[0]?.label?.toLowerCase() ?? "";
   const matiere = matiereCourte(p.material);
   const socle = [type, couleur, matiere && `en ${matiere}`]

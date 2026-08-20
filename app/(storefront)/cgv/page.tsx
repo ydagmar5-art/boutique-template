@@ -50,6 +50,15 @@ export default function CGV() {
         est facturé sur la base du tarif en vigueur au moment de la commande.
       </p>
 
+      {/*
+        ⚠️ ARTICLE CONDITIONNEL. Sans offre configurée, ce paragraphe affichait
+        « L'offre "" s'applique automatiquement… » : des conditions de vente
+        décrivant une promotion inexistante, ce qui est à la fois faux et
+        opposable. Il réapparaît dès que `brand.offer.short` est renseigné —
+        vérifier alors qu'il décrit bien la promotion réellement active.
+      */}
+      {brand.offer.short && (
+      <>
       <h2>Article 3 — Offres promotionnelles</h2>
       <p>
         L&apos;offre « {brand.offer.short} » s&apos;applique automatiquement dès
@@ -59,6 +68,8 @@ export default function CGV() {
         s&apos;appliquent sur le montant déjà remisé. Le détail du calcul est
         affiché dans le récapitulatif avant tout paiement.
       </p>
+      </>
+      )}
 
       <h2>Article 4 — Commande</h2>
       <p>
