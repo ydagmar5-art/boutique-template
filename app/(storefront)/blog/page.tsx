@@ -51,9 +51,11 @@ export default function BlogPage() {
 
       <h1 className="font-heading text-4xl font-light md:text-5xl">Blog</h1>
       <p className="mt-6 max-w-xl text-sm leading-[1.85] text-muted">
-        Choisir une pièce, la porter, la garder. Ce que nous regardons nous-mêmes
-        avant de retenir un modèle, et les questions que vous me posez le plus
-        souvent.
+        {/* ⚠️ CHAPEAU À RÉÉCRIRE POUR CHAQUE BOUTIQUE. Celui d'origine
+            décrivait de la maroquinerie et a survécu à plusieurs reprises du
+            modèle, jusqu'à se retrouver sur une boutique d'électroménager. */}
+        Ce que nous regardons avant de retenir un produit, et les questions que
+        vous nous posez le plus souvent.
       </p>
 
       {/* Grille : le visuel porte autant que le titre sur une page de blog. */}

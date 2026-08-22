@@ -12,7 +12,7 @@ export default function Confidentialite() {
   return (
     <Legal title="Politique de confidentialité">
       <p>
-        La présente politique décrit la manière dont {brand.name} PARIS,
+        La présente politique décrit la manière dont {brand.name},
         boutique exploitée par {l.operator}, collecte et traite vos données
         personnelles. La boutique s&apos;adressant à une clientèle résidant en
         France, le Règlement général sur la protection des données (RGPD)

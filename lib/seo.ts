@@ -110,6 +110,91 @@ function disponibilite(p: Product): string {
  * la note moyenne du site à un produit qui n'a reçu aucun avis est précisément
  * ce que Google sanctionne, et ce serait mentir à la cliente.
  */
+/**
+ * Référence fabricant (MPN).
+ *
+ * ⚠️ EXIGENCE GOOGLE MERCHANT CENTER, pas un ornement. Un article sans
+ * identifiant unique (`gtin`, ou `mpn` + `brand`) part en « Missing
+ * identifier » : il reste diffusable mais Google ne peut pas le rapprocher
+ * des fiches concurrentes, et il perd la comparaison de prix — c'est-à-dire
+ * l'essentiel du trafic Shopping.
+ *
+ * Quand la boutique EST la marque, `mpn` + `brand` suffisent : le GTIN
+ * n'existe que si le fournisseur en a fait attribuer un. Le jour où il en
+ * fournit un, le renseigner dans `gtin` du catalogue — il prend alors le pas.
+ *
+ * Dérivé du slug, donc STABLE : un identifiant qui change d'un déploiement à
+ * l'autre fait perdre à l'article son historique dans Merchant Center.
+ */
+function referenceFabricant(p: Product): string {
+  return p.slug.toUpperCase().replace(/[^A-Z0-9]+/g, "-");
+}
+
+/**
+ * Livraison et retours, balisés.
+ *
+ * ⚠️ Merchant Center LIT ces blocs pour préremplir les règles de livraison et
+ * de retour du compte. Sans eux, il faut les saisir à la main dans l'interface
+ * et le moindre écart avec la page produit vaut un avertissement « Shipping
+ * mismatch », puis la suspension des articles concernés.
+ *
+ * ⚠️ VALEURS À VÉRIFIER À CHAQUE NOUVELLE BOUTIQUE : pays livré, frais de
+ * port, délais de préparation et de transit. Elles doivent être IDENTIQUES
+ * aux CGV et à la page livraison — une divergence est invisible sur le site
+ * mais opposable, et c'est précisément ce que Google contrôle.
+ */
+function livraisonJsonLd() {
+  return {
+    "@type": "OfferShippingDetails",
+    shippingRate: {
+      "@type": "MonetaryAmount",
+      // Livraison offerte : cf. `brand.shippingNote`.
+      value: "0",
+      currency: brand.currency,
+    },
+    shippingDestination: {
+      "@type": "DefinedRegion",
+      // ⚠️ France métropolitaine uniquement. Le tunnel force `country: "FR"` :
+      // annoncer une zone plus large ferait diffuser des annonces sur des
+      // commandes que nous refusons ensuite.
+      addressCountry: "FR",
+    },
+    deliveryTime: {
+      "@type": "ShippingDeliveryTime",
+      // Expédition sous 48 h ouvrées (art. L216-2 : délai opposable).
+      handlingTime: {
+        "@type": "QuantitativeValue",
+        minValue: 0,
+        maxValue: 2,
+        unitCode: "DAY",
+      },
+      // Réception 3 à 5 jours ouvrés après la prise en charge.
+      transitTime: {
+        "@type": "QuantitativeValue",
+        minValue: 3,
+        maxValue: 5,
+        unitCode: "DAY",
+      },
+    },
+  };
+}
+
+function retoursJsonLd() {
+  return {
+    "@type": "MerchantReturnPolicy",
+    applicableCountry: "FR",
+    returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow",
+    // 14 jours : droit de rétractation, art. L221-18 du Code de la consommation.
+    merchantReturnDays: 14,
+    returnMethod: "https://schema.org/ReturnByMail",
+    // Les frais directs de renvoi sont à la charge du client (page
+    // « Rétractation & remboursement »). Ne PAS annoncer `FreeReturn` :
+    // Google confronte le balisage au texte de la page.
+    returnFees: "https://schema.org/ReturnFeesCustomerResponsibility",
+    merchantReturnLink: absolu("/remboursement"),
+  };
+}
+
 export function produitJsonLd(p: Product, avisPropres: Review[] = []) {
   const url = absolu(`/products/${p.slug}`);
   const note =
@@ -124,6 +209,10 @@ export function produitJsonLd(p: Product, avisPropres: Review[] = []) {
     description: p.description,
     image: p.images.map((i) => absolu(i)),
     sku: p.slug,
+    // ⚠️ Identifiants produit : sans eux, Merchant Center classe l'article en
+    // « identifiant manquant » et le retire de la comparaison de prix.
+    mpn: referenceFabricant(p),
+    ...(p.gtin ? { gtin: p.gtin } : {}),
     category: p.collection,
     material: p.material,
     brand: { "@type": "Brand", name: brand.name },
@@ -136,6 +225,8 @@ export function produitJsonLd(p: Product, avisPropres: Review[] = []) {
       availability: disponibilite(p),
       itemCondition: "https://schema.org/NewCondition",
       seller: { "@type": "Organization", name: brand.name },
+      shippingDetails: livraisonJsonLd(),
+      hasMerchantReturnPolicy: retoursJsonLd(),
     },
     ...(note !== null
       ? {
@@ -145,7 +236,13 @@ export function produitJsonLd(p: Product, avisPropres: Review[] = []) {
             reviewCount: avisPropres.length,
             bestRating: "5",
           },
-          review: avisPropres.map((r) => ({
+          /*
+            ⚠️ ÉCHANTILLON, PAS LA LISTE ENTIÈRE. `reviewCount` annonce le
+            total réel ; ces blocs n'en sont qu'un extrait, ce que Google admet
+            explicitement. Les baliser tous ajouterait des dizaines de
+            kilo-octets au HTML de chaque fiche, pour zéro gain.
+          */
+          review: avisPropres.slice(0, 10).map((r) => ({
             "@type": "Review",
             reviewRating: {
               "@type": "Rating",
@@ -155,6 +252,9 @@ export function produitJsonLd(p: Product, avisPropres: Review[] = []) {
             author: { "@type": "Person", name: r.author },
             name: r.title,
             reviewBody: r.body,
+            // ⚠️ Date RÉELLE de dépôt, réclamée par Google pour les résultats
+            // enrichis. Jamais une date recalculée au déploiement.
+            datePublished: r.date,
           })),
         }
       : {}),

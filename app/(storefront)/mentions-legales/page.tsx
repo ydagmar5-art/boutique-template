@@ -25,7 +25,7 @@ export default function MentionsLegales() {
     <Legal title="Mentions légales">
       <h2>Éditeur du site</h2>
       <p>
-        Le site <strong>{brand.name} PARIS</strong> est édité par{" "}
+        Le site <strong>{brand.name}</strong> est édité par{" "}
         <strong>{l.operator}</strong>, {l.legalForm}.
       </p>
       <ul>

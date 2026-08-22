@@ -308,6 +308,35 @@ export async function sendPaymentRefused(email: string, name: string, orderId?: 
   });
 }
 
+/**
+ * Commande TRAITÉE — étape intermédiaire entre le paiement et l'expédition.
+ *
+ * Elle comble le silence le plus coûteux du parcours : entre « payé » et
+ * « expédié », le client n'a aucune nouvelle et écrit au service client pour
+ * demander où en est sa commande. Cet e-mail répond avant qu'il ne pose la
+ * question, et annonce explicitement le suivant.
+ *
+ * ⚠️ AUCUN NUMÉRO DE SUIVI ICI : le colis n'est pas encore remis au
+ * transporteur. Annoncer un suivi qui ne répond pas encore génère plus
+ * d'inquiétude que pas de suivi du tout.
+ */
+export async function sendOrderProcessing(order: Order) {
+  const first = order.customer.split(" ")[0] || "";
+  return sendEmail({
+    to: order.email,
+    subject: `Votre commande ${order.id} est prête à partir`,
+    html: shell({
+      preheader: `Votre colis est préparé. Le suivi arrive à l'expédition.`,
+      badge: "Commande traitée",
+      heading: first ? `C'est prêt, ${first}.` : "C'est prêt.",
+      intro:
+        "Votre commande a été préparée et contrôlée : elle attend maintenant son passage au transporteur. Vous recevrez un second message avec le numéro de suivi dès qu'elle sera remise, pour la suivre jusqu'à votre porte.",
+      body: orderCard(order),
+      cta: SITE ? { label: "Voir ma commande", url: `${SITE}/order/${order.id}` } : undefined,
+    }),
+  });
+}
+
 export async function sendOrderShipped(order: Order) {
   const track = order.tracking ? trackingUrl(order.tracking) : "";
   return sendEmail({

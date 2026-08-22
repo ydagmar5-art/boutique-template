@@ -23,7 +23,7 @@ export default function CGV() {
     <Legal title="Conditions générales de vente">
       <p>
         Les présentes conditions générales de vente régissent les ventes de
-        produits réalisées sur le site {brand.name} PARIS, édité par{" "}
+        produits réalisées sur le site {brand.name}, édité par{" "}
         <strong>{l.operator}</strong> ({l.legalForm}), {l.address}, immatriculée
         au registre {l.registry} sous le numéro {l.registrationNumber}. Toute
         commande implique l&apos;acceptation sans réserve des présentes

@@ -9,6 +9,9 @@ import ShippingDialog from "@/components/admin/ShippingDialog";
 const OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: "pending", label: "En attente" },
   { value: "paid", label: "Payée" },
+  // Étape intermédiaire : la commande est préparée mais pas encore remise
+  // au transporteur. Elle déclenche son propre e-mail.
+  { value: "processing", label: "Traitée" },
   { value: "shipped", label: "Expédiée" },
   { value: "cancelled", label: "Annulée" },
   { value: "refunded", label: "Remboursée" },

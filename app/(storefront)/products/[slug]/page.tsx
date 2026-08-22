@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { seedProducts } from "@/lib/products";
 import { reviews, averageRating } from "@/lib/reviews";
+import SecuriteProduit from "@/components/shop/SecuriteProduit";
 import { getVisibleProduct, listVisibleProducts } from "@/lib/actions/products";
 import { getStorefrontSettings } from "@/lib/actions/storefront";
 import AddToCart from "@/components/shop/AddToCart";
@@ -339,6 +340,15 @@ export default async function ProductPage({
           </div>
         </section>
       )}
+
+      {/* Sécurité et conformité — règlement (UE) 2023/988.
+          ⚠️ Ne s'affiche que si `lib/securite-produit.ts` est renseigné : la
+          section reste invisible tant que le fabricant et le responsable
+          établi dans l'Union ne sont pas connus. Obligation légale pour toute
+          vente à distance dans l'Union — un lien vers une autre page ne
+          satisfait PAS l'article 19. */}
+      <SecuriteProduit />
+
     </div>
   );
 }

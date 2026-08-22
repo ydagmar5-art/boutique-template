@@ -1,6 +1,8 @@
 export type OrderStatus =
   | "paid"
   | "pending"
+  /** Commande préparée, en attente de remise au transporteur. */
+  | "processing"
   | "shipped"
   | "refunded"
   | "cancelled";
@@ -81,6 +83,7 @@ export function statusLabel(s: OrderStatus) {
   return {
     paid: "Payée",
     pending: "En attente",
+    processing: "Traitée",
     shipped: "Expédiée",
     refunded: "Remboursée",
     cancelled: "Annulée",
@@ -89,6 +92,8 @@ export function statusLabel(s: OrderStatus) {
 
 export const STATUS_STYLE: Record<OrderStatus, string> = {
   paid: "bg-organic/15 text-organic",
+  // Traitée : teinte intermédiaire entre « payée » et « expédiée ».
+  processing: "bg-primary/10 text-primary",
   shipped: "bg-primary/15 text-primary-dark",
   pending: "bg-halo text-primary-dark",
   refunded: "bg-secondary/15 text-secondary",

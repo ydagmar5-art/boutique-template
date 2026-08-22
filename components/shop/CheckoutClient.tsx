@@ -15,6 +15,7 @@ import type { OrderItem } from "@/lib/db/seed";
 import PaymentBadges from "@/components/site/PaymentBadges";
 import Reassurances from "@/components/site/Reassurances";
 import FrenchMark from "@/components/site/FrenchMark";
+import TimelineLivraison from "./TimelineLivraison";
 
 /** Récapitulatif chiffré par le serveur (seul juge du montant). */
 interface Quote {
@@ -235,6 +236,64 @@ export default function CheckoutClient({
       country: "FR",
     };
 
+    /*
+      ╔══════════════════════════════════════════════════════════════════╗
+      ║  APPLE PAY / GOOGLE PAY : LE GESTE UTILISATEUR NE SE DÉLÈGUE PAS ║
+      ╚══════════════════════════════════════════════════════════════════╝
+
+      ⚠️ `PaymentRequest.show()` — l'API par laquelle Apple Pay et Google Pay
+      ouvrent leur feuille — n'est autorisée par le navigateur que pendant la
+      brève « activation transitoire » consécutive à un clic. Cette activation
+      ne survit pas à un `await` sur un appel réseau.
+
+      Or le contrôle de prix ci-dessous est un aller-retour serveur. Le temps
+      qu'il revienne, l'activation est perdue : `show()` est refusé en silence
+      par le navigateur, Whop n'émet rien, et le bouton restait sur « Paiement
+      en cours… » sans qu'aucune feuille ne s'ouvre. La carte, elle, n'exige
+      aucun geste — d'où un tunnel qui marchait par carte et pas par Apple Pay.
+
+      ⚠️ ON APPELLE DONC LE PSP EMBARQUÉ *AVANT* TOUT `await`. Ne jamais
+      réintroduire d'appel réseau entre le clic et cette ligne.
+
+      ⚠️ La sécurité du montant n'en dépend pas : `payWhop` recalcule le panier
+      depuis le catalogue côté serveur et REFUSE la commande si Whop a encaissé
+      autre chose (cf. `lib/actions/checkout.ts`). Le contrôle client n'était
+      qu'un confort d'affichage.
+    */
+    if (psp && confirm.current) {
+      const promesse = confirm.current({
+        draft,
+        amount: total,
+        buyer: {
+          firstName,
+          lastName,
+          email: draft.email,
+          phone,
+          address: street,
+          city,
+          zip,
+          countryCode: "FR",
+        },
+      });
+      start(async () => {
+        const res = await promesse;
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        // Le PSP a pris la main sur la navigation : ne rien faire d'autre,
+        // surtout pas vider le panier.
+        if (res.handled) return;
+        if (!res.orderId) {
+          setError("Le paiement a échoué.");
+          return;
+        }
+        clear();
+        router.push(`/order/${res.orderId}`);
+      });
+      return;
+    }
+
     start(async () => {
       /*
         🔒 LE MONTANT AFFICHÉ DOIT ÊTRE LE MONTANT DÉBITÉ.
@@ -257,38 +316,6 @@ export default function CheckoutClient({
         setError(
           "Le montant de votre commande vient d'être mis à jour. Vérifiez le récapitulatif avant de valider.",
         );
-        return;
-      }
-
-      // ── Paiement sur place : le PSP encaisse sans quitter le site ──
-      if (psp && confirm.current) {
-        const res = await confirm.current({
-          draft,
-          amount: total,
-          buyer: {
-            firstName,
-            lastName,
-            email: draft.email,
-            phone,
-            address: street,
-            city,
-            zip,
-            countryCode: "FR",
-          },
-        });
-        if (res.error) {
-          setError(res.error);
-          return;
-        }
-        // Le PSP a pris la main sur la navigation (3-D Secure, retour propre) :
-        // ne rien faire d'autre, surtout pas vider le panier.
-        if (res.handled) return;
-        if (!res.orderId) {
-          setError("Le paiement a échoué.");
-          return;
-        }
-        clear();
-        router.push(`/order/${res.orderId}`);
         return;
       }
 
@@ -546,9 +573,16 @@ export default function CheckoutClient({
             >
               <span className="text-ink">{brand.offer.short}</span>
               <br />
-              Ajouter une seconde pièce
+              Continuer mes achats
             </Link>
           )}
+          {/* Calendrier de livraison, au-dessus du récapitulatif.
+              ⚠️ PAS d'appel à l'action ici : rien ne doit détourner du
+              paiement une fois le client engagé dans le tunnel. */}
+          <div className="mb-5">
+            <TimelineLivraison compact />
+          </div>
+
           <div className="space-y-4">
             {lines.map((l) => (
               <div key={`${l.slug}-${l.variantId}`} className="flex gap-3">

@@ -17,6 +17,7 @@ import {
   sendMerchantNewOrder,
   sendOrderShipped,
   sendOrderCancelled,
+  sendOrderProcessing,
   sendOrderRefunded,
 } from "@/lib/emails";
 import { sendTelegramSale } from "@/lib/telegram";
@@ -191,6 +192,8 @@ export async function updateOrderStatus(
       await sendOrderShipped(o);
       await remonterLeSuivi(o);
     }
+    // Étape intermédiaire : préparée, pas encore remise au transporteur.
+    else if (status === "processing") await sendOrderProcessing(o);
     else if (status === "cancelled") await sendOrderCancelled(o);
     else if (status === "refunded") await sendOrderRefunded(o);
   }

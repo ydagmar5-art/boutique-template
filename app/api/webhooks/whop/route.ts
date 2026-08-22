@@ -125,16 +125,26 @@ export async function POST(req: Request) {
   };
   if (!signatureValide(brut, entetes, secret)) {
     /*
-      Premier diagnostic utile : on remonte les NOMS d'en-têtes reçus (jamais
-      leur valeur, qui est un secret de signature). C'est ce qui permet de
-      pointer le bon en-tête si Whop en change, sans deviner.
+      ⚠️ DIAGNOSTIC EN JOURNAL, JAMAIS SUR TELEGRAM.
+
+      Cette alerte partait auparavant sur Telegram. Erreur de conception : le
+      canal Telegram du gérant sert à savoir qu'une VENTE est tombée pendant
+      son absence, pas à surveiller la santé du site. Et comme Whop réessaie un
+      webhook refusé, une seule vente produisait une rafale de messages
+      d'erreur au milieu des notifications de commande — le bruit finit par
+      faire ignorer le signal.
+
+      ⚠️ NE JAMAIS REBRANCHER `sendTelegramAlert` ICI. Les incidents
+      techniques se lisent dans les journaux Vercel.
+
+      On journalise les NOMS d'en-têtes reçus, jamais leurs valeurs : la
+      signature est un secret. C'est ce qui permet d'identifier l'en-tête
+      réellement employé par Whop sans le deviner.
     */
-    await sendTelegramAlert(
-      "⚠️ Webhook Whop — signature refusée · " +
-        `webhook-id ${entetes.id ? "présent" : "ABSENT"}, ` +
-        `horodatage ${entetes.horodatage || "ABSENT"}, ` +
-        `signature ${entetes.signature ? "présente" : "ABSENTE"}`,
-    ).catch(() => {});
+    console.warn(
+      "[webhook whop] signature refusée · en-têtes reçus :",
+      JSON.stringify([...req.headers.keys()]),
+    );
     return NextResponse.json({ error: "signature invalide" }, { status: 401 });
   }
 

@@ -45,6 +45,21 @@ export interface Product {
    * un champ absent du formulaire serait effacé à la première modification.
    */
   story?: ProductStory;
+  /**
+   * Code-barres du fabricant (EAN-13, UPC…), s'il en existe un.
+   *
+   * ⚠️ NE JAMAIS L'INVENTER. Un GTIN erroné rattache l'article à un tout autre
+   * produit dans Merchant Center : Google constate l'écart de prix ou de titre
+   * et désapprouve l'article, parfois tout le compte. Laisser vide tant que le
+   * fournisseur n'en communique pas un — `mpn` + `brand` suffisent alors.
+   */
+  gtin?: string;
+  /**
+   * Étiquette de segmentation pour les campagnes Google Ads
+   * (`custom_label_0` du flux). Interne : jamais affichée à l'internaute.
+   * Absente = valeur par défaut définie dans `app/feed.xml/route.ts`.
+   */
+  etiquetteAds?: string;
   images: string[];
   variants: ProductVariant[];
   featured?: boolean;

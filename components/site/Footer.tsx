@@ -1,12 +1,21 @@
 import Link from "next/link";
+import GererCookies from "./GererCookies";
 import { brand } from "@/config/brand.config";
 import Logo from "./Logo";
 import PaymentBadges from "./PaymentBadges";
 import FrenchMark from "./FrenchMark";
 
+/**
+ * ⚠️ PAS de marge supérieure sur le `<footer>` — ne pas remettre `mt-24`.
+ * Elle produisait une bande blanche de 96 px entre le footer et les pages
+ * qui se terminent par un visuel pleine largeur (accueil, fiche produit).
+ * Les pages de texte qui ont besoin d'air la posent elles-mêmes, en bas de
+ * leur propre contenu : c'est à la page de décider de sa respiration, pas au
+ * footer de l'imposer à toutes.
+ */
 export default function Footer() {
   return (
-    <footer className="mt-24 border-t border-line bg-ink text-bg">
+    <footer className="border-t border-line bg-ink text-bg">
       <div className="mx-auto grid max-w-6xl gap-10 px-5 py-16 sm:px-8 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
         <div>
           <Logo tone="light" />
@@ -78,6 +87,10 @@ export default function Footer() {
                 Confidentialité
               </Link>
             </li>
+            <li>
+              {/* Révocation du consentement — art. 7.3 du RGPD. */}
+              <GererCookies className="transition-colors hover:text-bg" />
+            </li>
           </ul>
         </div>
         <div>
@@ -123,7 +136,14 @@ export default function Footer() {
           titulaire du compte.
         */}
         <div className="mx-auto max-w-6xl px-5 py-5 text-center text-xs leading-relaxed text-bg/40 sm:px-8">
-          © {new Date().getFullYear()} {brand.name} PARIS. Tous droits réservés.
+          {/* ⚠️ NE JAMAIS RAJOUTER DE VILLE ICI. Le modèle d'origine venait
+              d'une maison parisienne et la mention « PARIS » a survécu à
+              plusieurs reprises, jusqu'à affirmer un établissement en France
+              pour une société immatriculée à l'étranger. C'est une fausse
+              indication d'établissement — et le premier écart que relèvent
+              Merchant Center et les prestataires de paiement, qui comparent
+              le pied de page au titulaire du compte. */}
+          © {new Date().getFullYear()} {brand.name}. Tous droits réservés.
           <br />
           {brand.legal.operator} — {brand.legal.registry.split(",")[0]} n°{" "}
           {brand.legal.registrationNumber} — {brand.legal.address}

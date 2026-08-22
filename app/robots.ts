@@ -45,13 +45,33 @@ const ROBOTS_IA = [
  * `app/layout.tsx` pilotait déjà la balise meta avec cette variable, mais
  * `robots.txt` l'ignorait : une boutique en préproduction demandait donc aux
  * moteurs de ne pas l'indexer… tout en les invitant à l'explorer, sitemap
- * compris. Les deux signaux doivent venir de la même source, sans quoi ils se
- * contredisent — et c'est le plus permissif qui l'emporte en pratique.
+ * compris. Les deux signaux doivent venir de la même source, sans quoi ils
+ * se contredisent — et c'est le plus permissif qui l'emporte en pratique.
  *
  * ⚠️ `robots.txt` demande de ne pas EXPLORER ; il n'empêche pas d'INDEXER une
  * URL découverte par un lien entrant. Seule la balise `noindex` le fait. Les
  * deux restent donc nécessaires.
  */
+/**
+ * Robots de Google Ads et Merchant Center.
+ *
+ * ⚠️ CES AGENTS IGNORENT `User-agent: *` — c'est documenté et volontaire chez
+ * Google : une boutique qui bloque tout par mégarde ne doit pas voir ses
+ * annonces déjà payées cesser de fonctionner. Conséquence pratique : sans
+ * règle NOMMÉE, `AdsBot-Google` explore aussi `/checkout` et `/order/`, qui
+ * portent les données personnelles des clientes.
+ *
+ * On leur redonne donc explicitement les mêmes exclusions qu'aux autres — et
+ * l'accès aux pages produit, sans lequel Google Ads refuse la page de
+ * destination (« Page de destination inaccessible ») et Merchant Center
+ * désapprouve l'article.
+ */
+const ROBOTS_GOOGLE_ADS = [
+  "AdsBot-Google", // Ads — contrôle des pages de destination (ordinateur)
+  "AdsBot-Google-Mobile", // Ads — contrôle des pages de destination (mobile)
+  "Googlebot-Image", // Images des articles Shopping
+];
+
 export default function robots(): MetadataRoute.Robots {
   const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   const interdits = ["/admin", "/admin/", "/checkout", "/order/"];
@@ -72,6 +92,28 @@ export default function robots(): MetadataRoute.Robots {
         allow: "/",
         disallow: interdits,
       })),
+      ...ROBOTS_GOOGLE_ADS.map((userAgent) => ({
+        userAgent,
+        allow: "/",
+        disallow: interdits,
+      })),
+      /*
+       * Storebot-Google — le robot qui VÉRIFIE LE TUNNEL DE COMMANDE.
+       *
+       * ⚠️ Seul agent à qui `/checkout` est ouvert, et c'est délibéré :
+       * Merchant Center s'en sert pour contrôler que le parcours d'achat
+       * aboutit. Le lui interdire, c'est empêcher la vérification du compte
+       * — donc échouer l'examen sans jamais savoir pourquoi.
+       *
+       * ⚠️ `/order/` RESTE FERMÉ pour lui aussi : ces pages portent le nom,
+       * l'e-mail et le détail d'achat d'une cliente. Le tunnel, lui, n'est
+       * qu'un formulaire vide tant qu'il n'est pas rempli.
+       */
+      {
+        userAgent: "Storebot-Google",
+        allow: "/",
+        disallow: ["/admin", "/admin/", "/order/"],
+      },
     ],
     ...(site ? { sitemap: `${site}/sitemap.xml`, host: site } : {}),
   };
