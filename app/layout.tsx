@@ -13,8 +13,9 @@ import "./globals.css";
  * correction.
  *
  * Le référencement est OUVERT depuis que l'exploitant figure dans
- * `brand.legal` et que le domaine est branché : la variable a été retirée du
- * projet Vercel. La remettre à "1" pour rebasculer en préproduction.
+ * `brand.legal` et que le domaine est branché : la variable a été retirée des
+ * variables d'environnement du site. La remettre à "1" pour rebasculer en
+ * préproduction.
  */
 const noindex = process.env.NOINDEX === "1";
 

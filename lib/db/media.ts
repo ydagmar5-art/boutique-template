@@ -2,28 +2,27 @@ import "server-only";
 import { promises as fs } from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
-import { store } from "@/config/store.config";
-import { hasSupabase, supabaseAdmin } from "@/lib/supabase/server";
 
 /**
  * Stockage des fichiers uploadés depuis le back-office (photos produit).
  *
- * - Supabase configuré : bucket public `media` (durable, servi par le CDN
- *   Supabase). C'est le seul mode qui fonctionne en production — sur Vercel le
- *   disque est en lecture seule.
- * - Sinon (dev local) : `public/uploads`, servi directement par Next.
+ * ⚠️ LE PIÈGE DE L'HÉBERGEMENT HOSTINGER. Le disque est inscriptible — mais
+ * un déploiement (`hosting nodejs start-build`) REMPLACE tout le contenu du
+ * site. Une photo écrite sous `public/` ou dans le dossier de l'application
+ * disparaît donc à la mise en ligne suivante, sans avertissement, et les
+ * fiches produit se retrouvent avec des images mortes.
  *
- * Même logique de repli que `lib/db/store.ts` : l'appelant n'a pas à savoir
- * lequel des deux est actif.
+ * Les fichiers vivent donc HORS de l'arborescence déployée, dans le dossier
+ * désigné par `MEDIA_DIR` — typiquement `/home/<compte>/media/<prefixe>`,
+ * voisin de `domains/` et jamais touché par un déploiement. Ils sont servis
+ * par la route `app/media/[name]/route.ts`, d'où l'URL `/media/<fichier>`.
+ *
+ * En développement, `MEDIA_DIR` non défini vaut `./media` à la racine du
+ * projet : même chemin d'URL, même code, aucun cas particulier.
  */
 
-/**
- * ⚠️ Bucket PRÉFIXÉ par boutique, comme les tables : le projet Supabase est
- * partagé, et un bucket commun ferait apparaître les photos d'une boutique
- * dans le back-office d'une autre.
- */
-const BUCKET = `${store.prefix}-media`;
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+export const MEDIA_DIR =
+  process.env.MEDIA_DIR || path.join(process.cwd(), "media");
 
 /** Nom de fichier sûr et unique : pas de collision, pas de caractère exotique. */
 function safeName(original: string): string {
@@ -39,42 +38,46 @@ function safeName(original: string): string {
   return `${base || "image"}-${randomBytes(4).toString("hex")}${ext}`;
 }
 
-let bucketReady = false;
-
-/** Crée le bucket public au premier upload — évite une étape de config manuelle. */
-async function ensureBucket() {
-  if (bucketReady) return;
-  const sb = supabaseAdmin();
-  const { data } = await sb.storage.getBucket(BUCKET);
-  if (!data) {
-    await sb.storage.createBucket(BUCKET, {
-      public: true,
-      fileSizeLimit: "10MB",
-      allowedMimeTypes: ["image/webp", "image/jpeg", "image/png", "image/avif", "image/gif"],
-    });
-  }
-  bucketReady = true;
-}
-
 /** Enregistre un fichier et renvoie son URL publique. */
 export async function saveMedia(
   bytes: ArrayBuffer,
   originalName: string,
-  contentType: string,
+  _contentType: string,
 ): Promise<string> {
   const name = safeName(originalName);
+  await fs.mkdir(MEDIA_DIR, { recursive: true });
+  await fs.writeFile(path.join(MEDIA_DIR, name), Buffer.from(bytes));
+  return `/media/${name}`;
+}
 
-  if (hasSupabase()) {
-    await ensureBucket();
-    const sb = supabaseAdmin();
-    const { error } = await sb.storage
-      .from(BUCKET)
-      .upload(name, bytes, { contentType, upsert: false, cacheControl: "31536000" });
-    if (error) throw new Error(error.message);
-    return sb.storage.from(BUCKET).getPublicUrl(name).data.publicUrl;
-  }
+/**
+ * Chemin absolu d'un média, ou `null` si le nom est refusé.
+ *
+ * ⚠️ Le nom vient de l'URL : sans ce filtre, `..%2F..%2Fetc%2Fpasswd` ferait
+ * lire n'importe quel fichier du compte. On n'accepte donc qu'un nom plat,
+ * et on revérifie APRÈS résolution que le chemin reste dans le dossier —
+ * les deux contrôles sont nécessaires, le premier pouvant être contourné par
+ * un encodage inattendu.
+ */
+export function mediaPath(name: string): string | null {
+  if (!name || name.includes("/") || name.includes("\\") || name.includes("\0")) return null;
+  if (name === "." || name === "..") return null;
+  const full = path.resolve(MEDIA_DIR, name);
+  if (full !== path.join(path.resolve(MEDIA_DIR), name)) return null;
+  return full;
+}
 
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  await fs.writeFile(path.join(UPLOAD_DIR, name), Buffer.from(bytes));
-  return `/uploads/${name}`;
+const TYPES: Record<string, string> = {
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".avif": "image/avif",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+};
+
+/** Type MIME d'après l'extension — jamais d'après le fichier lui-même. */
+export function mediaType(name: string): string {
+  return TYPES[path.extname(name).toLowerCase()] || "application/octet-stream";
 }

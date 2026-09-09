@@ -1,38 +1,51 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
-import { hasSupabase, supabaseAdmin } from "@/lib/supabase/server";
+import { hasDb, q, exec, sqlDate } from "@/lib/db/mysql";
 import { listOrders } from "@/lib/actions/orders";
 import { listProducts } from "@/lib/actions/products";
+import { getSession } from "@/lib/auth/session";
 import { store } from "@/config/store.config";
 import { isBotUserAgent } from "@/lib/analytics/bots";
 
 const VISITS = store.db.visits;
 const VISITORS = store.db.visitors;
+const PRESENCE = store.db.presence;
+
+/** Plafond de lignes relues pour un agrégat — au-delà, la page ne répondrait plus. */
+const PLAFOND = 50_000;
 
 /*
   ⚠️ TOLÉRANCE À LA COLONNE `source` MANQUANTE.
 
   L'origine du visiteur est arrivée après la création de la table. Sur une
   base déjà en service, la colonne n'existe qu'une fois la migration passée
-  (voir `supabase/schema.sql`) — et PostgREST REJETTE toute la requête quand
-  on écrit dans une colonne inconnue. Sans ce garde-fou, une boutique dont la
-  migration n'a pas encore été jouée cesserait purement et simplement
-  d'enregistrer ses visites : une panne silencieuse pour un simple ornement
-  d'affichage.
+  (voir `db/schema.sql`) — et MySQL REJETTE toute la requête quand on écrit
+  dans une colonne inconnue (`ER_BAD_FIELD_ERROR`). Sans ce garde-fou, une
+  boutique dont la migration n'a pas encore été jouée cesserait purement et
+  simplement d'enregistrer ses visites : une panne silencieuse pour un simple
+  ornement d'affichage.
 
   On tente donc AVEC l'origine, et on retombe sans elle une fois pour toutes.
 */
 let colonneSource = true;
 
-/** Récupère IP + ville depuis les en-têtes (fournis par Vercel en production). */
+/**
+ * Récupère IP + ville depuis les en-têtes.
+ *
+ * ⚠️ CE QUI A CHANGÉ EN QUITTANT VERCEL. `x-vercel-ip-city` n'existe plus :
+ * l'hébergement Hostinger ne fait aucune géolocalisation, il transmet
+ * seulement l'adresse. La ville reste donc vide sauf si un intermédiaire en
+ * pose une (Cloudflare devant le domaine, par exemple). Le back-office
+ * affiche « Ville inconnue » dans ce cas — c'est normal, pas une panne.
+ */
 async function geoFromHeaders(): Promise<{ ip?: string; city?: string }> {
   try {
     const h = await headers();
     const fwd = h.get("x-forwarded-for");
     const ip = (fwd ? fwd.split(",")[0] : h.get("x-real-ip"))?.trim() || undefined;
-    const rawCity = h.get("x-vercel-ip-city");
-    const city = rawCity ? decodeURIComponent(rawCity) : undefined;
+    const raw = h.get("cf-ipcity") || h.get("x-geo-city");
+    const city = raw ? decodeURIComponent(raw) : undefined;
     return { ip, city };
   } catch {
     return {};
@@ -72,9 +85,9 @@ export async function trackVisit(
   /** Origine mémorisée par le navigateur à la toute première visite. */
   source?: string,
 ): Promise<{ count: number; ip?: string; city?: string }> {
-  if (path.startsWith("/admin") || !hasSupabase()) return { count: 0 };
+  if (path.startsWith("/admin") || !hasDb()) return { count: 0 };
   if (await ignorer()) return { count: 0 };
-  const sb = supabaseAdmin();
+
   let host: string | undefined;
   if (referrer) {
     try {
@@ -84,56 +97,59 @@ export async function trackVisit(
     }
   }
   const { ip, city } = await geoFromHeaders();
-  await sb
-    .from(VISITS)
-    .insert({ path, referrer: host, visitor, type: "view", ip, city });
-  let existant: { count?: number; source?: string } | null = null;
-  /* ⚠️ `lu` et non `!existant` : une visiteuse inconnue rend légitimement
-     null, et retester sur la nullité relancerait une requête à chaque toute
-     première visite. */
-  let lu = false;
+
+  await exec(
+    `insert into \`${VISITS}\` (\`ts\`, \`path\`, \`referrer\`, \`visitor\`, \`type\`, \`ip\`, \`city\`)
+     values (?, ?, ?, ?, 'view', ?, ?)`,
+    [sqlDate(), path.slice(0, 512), host ?? null, visitor, ip ?? null, city ?? null],
+  );
+
+  /*
+    ⚠️ PREMIER CONTACT. `coalesce(source, ?)` est le cœur de la règle : une
+    origine déjà connue prime TOUJOURS sur celle que remonte le navigateur.
+    Sans ça, chaque retour d'une cliente écraserait sa provenance par celle
+    du jour, et tout finirait attribué à « Direct ».
+
+    ⚠️ `count = count + 1` est calculé PAR LA BASE, jamais lu puis réécrit :
+    deux pages ouvertes en même temps se marcheraient dessus et la visiteuse
+    resterait éternellement à sa deuxième visite.
+  */
+  const maintenant = sqlDate();
+  const avec =
+    `insert into \`${VISITORS}\` (\`id\`,\`first_seen\`,\`last_seen\`,\`last_path\`,\`count\`,\`ip\`,\`city\`,\`source\`)
+     values (?, ?, ?, ?, 1, ?, ?, ?)
+     on duplicate key update \`last_seen\` = ?, \`last_path\` = ?, \`count\` = \`count\` + 1,
+       \`ip\` = ?, \`city\` = ?, \`source\` = coalesce(\`source\`, ?)`;
+  const sans =
+    `insert into \`${VISITORS}\` (\`id\`,\`first_seen\`,\`last_seen\`,\`last_path\`,\`count\`,\`ip\`,\`city\`)
+     values (?, ?, ?, ?, 1, ?, ?)
+     on duplicate key update \`last_seen\` = ?, \`last_path\` = ?, \`count\` = \`count\` + 1,
+       \`ip\` = ?, \`city\` = ?`;
+  const court = path.slice(0, 512);
+
   if (colonneSource) {
-    const r = await sb
-      .from(VISITORS)
-      .select("count,source")
-      .eq("id", visitor)
-      .maybeSingle();
-    if (r.error) colonneSource = false;
-    else {
-      existant = r.data;
-      lu = true;
+    try {
+      await exec(avec, [
+        visitor, maintenant, maintenant, court, ip ?? null, city ?? null, source ?? null,
+        maintenant, court, ip ?? null, city ?? null, source ?? null,
+      ]);
+    } catch {
+      // Migration pas encore jouée : on désarme et on réécrit sans l'origine.
+      colonneSource = false;
     }
   }
-  if (!lu) {
-    const r = await sb.from(VISITORS).select("count").eq("id", visitor).maybeSingle();
-    existant = r.data;
-  }
-  const count = (existant?.count ?? 0) + 1;
-
-  const ligne: Record<string, unknown> = {
-    id: visitor,
-    last_seen: new Date().toISOString(),
-    last_path: path,
-    count,
-    ip,
-    city,
-  };
-  /* ⚠️ PREMIER CONTACT. `upsert` réécrit la ligne entière : sans cette garde,
-     chaque retour d'une cliente écraserait son origine par celle du jour, et
-     tout finirait attribué à « Direct ». L'origine déjà connue prime donc
-     toujours sur celle qui remonte du navigateur. */
-  if (colonneSource && (existant?.source || source)) {
-    ligne.source = existant?.source || source;
+  if (!colonneSource) {
+    await exec(sans, [
+      visitor, maintenant, maintenant, court, ip ?? null, city ?? null,
+      maintenant, court, ip ?? null, city ?? null,
+    ]);
   }
 
-  const { error } = await sb.from(VISITORS).upsert(ligne);
-  if (error && colonneSource) {
-    // Migration pas encore jouée : on désarme et on réécrit sans l'origine.
-    colonneSource = false;
-    delete ligne.source;
-    await sb.from(VISITORS).upsert(ligne);
-  }
-  return { count, ip, city };
+  const [ligne] = await q<{ count: number }>(
+    `select \`count\` from \`${VISITORS}\` where \`id\` = ? limit 1`,
+    [visitor],
+  );
+  return { count: ligne?.count ?? 1, ip, city };
 }
 
 export async function trackEvent(
@@ -141,9 +157,108 @@ export async function trackEvent(
   path: string,
   visitor: string,
 ): Promise<void> {
-  if (!hasSupabase()) return;
+  if (!hasDb()) return;
   if (await ignorer()) return;
-  await supabaseAdmin().from(VISITS).insert({ path, visitor, type });
+  await exec(
+    `insert into \`${VISITS}\` (\`ts\`, \`path\`, \`visitor\`, \`type\`) values (?, ?, ?, ?)`,
+    [sqlDate(), path.slice(0, 512), visitor, type.slice(0, 32)],
+  );
+}
+
+/* ─────────── Présence « en direct » ─────────── */
+
+export interface PresenceRow {
+  id: string;
+  path: string;
+  count: number;
+  since: number;
+  ip?: string;
+  city?: string;
+  source?: string;
+}
+
+/**
+ * Battement de présence, émis par le navigateur de la visiteuse.
+ *
+ * ⚠️ REMPLACE LE TEMPS RÉEL DE SUPABASE, qui n'a pas d'équivalent chez
+ * Hostinger. Une ligne par visiteuse, réécrite à chaque battement : c'est
+ * `since` qui porte l'information « toujours là ». Personne ne supprime la
+ * ligne au départ — un onglet fermé brutalement, une veille ou une coupure
+ * réseau n'envoient rien. C'est la LECTURE qui écarte les périmées.
+ */
+export async function battrePresence(p: {
+  id: string;
+  path: string;
+  count?: number;
+  ip?: string;
+  city?: string;
+  source?: string;
+}): Promise<void> {
+  if (!hasDb() || !p.id) return;
+  if (p.path.startsWith("/admin")) return;
+  if (await ignorer()) return;
+  const now = sqlDate();
+  try {
+    await exec(
+      `insert into \`${PRESENCE}\` (\`id\`,\`path\`,\`count\`,\`ip\`,\`city\`,\`source\`,\`since\`)
+       values (?, ?, ?, ?, ?, ?, ?)
+       on duplicate key update \`path\` = ?, \`count\` = ?, \`ip\` = ?, \`city\` = ?,
+         \`source\` = coalesce(\`source\`, ?), \`since\` = ?`,
+      [
+        p.id.slice(0, 64), p.path.slice(0, 512), p.count ?? 1, p.ip ?? null,
+        p.city ?? null, p.source ?? null, now,
+        p.path.slice(0, 512), p.count ?? 1, p.ip ?? null, p.city ?? null,
+        p.source ?? null, now,
+      ],
+    );
+  } catch {
+    /* La présence est un confort : elle ne doit jamais faire échouer une page. */
+  }
+}
+
+/**
+ * Visiteuses actuellement sur la boutique.
+ *
+ * ⚠️ RÉSERVÉ À L'ADMINISTRATION. Cette fonction renvoie des adresses IP, et
+ * une action serveur est une URL publique comme une autre : sans ce contrôle,
+ * n'importe qui pourrait relever le trafic de la boutique en direct.
+ */
+export async function presenceEnLigne(): Promise<PresenceRow[]> {
+  if (!hasDb()) return [];
+  const session = await getSession();
+  if (session?.role !== "admin") return [];
+
+  const perime = store.presence.perime;
+  const rows = await q<{
+    id: string; path: string | null; count: number; ip: string | null;
+    city: string | null; source: string | null; since: Date | string;
+  }>(
+    `select \`id\`,\`path\`,\`count\`,\`ip\`,\`city\`,\`source\`,\`since\`
+     from \`${PRESENCE}\`
+     where \`since\` >= ? order by \`since\` desc limit 200`,
+    [sqlDate(new Date(Date.now() - perime * 1000))],
+  );
+
+  /* Purge paresseuse : les lignes vieilles de plus de dix minutes ne
+     serviront plus jamais. Faite ici plutôt qu'à chaque battement — c'est
+     l'écran d'administration qui est rare, pas les visites. */
+  try {
+    await exec(`delete from \`${PRESENCE}\` where \`since\` < ?`, [
+      sqlDate(new Date(Date.now() - 600_000)),
+    ]);
+  } catch {
+    /* sans conséquence */
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    path: r.path ?? "/",
+    count: r.count,
+    since: new Date(r.since).getTime(),
+    ip: r.ip ?? undefined,
+    city: r.city ?? undefined,
+    source: r.source ?? undefined,
+  }));
 }
 
 /* ─────────── Agrégats historiques ─────────── */
@@ -187,19 +302,29 @@ const empty: StatsResult = {
   topReferrers: [],
 };
 
+interface LigneVisite {
+  ts: Date | string;
+  path: string | null;
+  referrer: string | null;
+  type: string | null;
+  visitor: string | null;
+}
+
+/** Journal de visites d'une période, dans la limite du plafond. */
+async function visitesEntre(from: Date, to: Date): Promise<LigneVisite[]> {
+  return q<LigneVisite>(
+    `select \`ts\`,\`path\`,\`referrer\`,\`type\`,\`visitor\`
+     from \`${VISITS}\` where \`ts\` >= ? and \`ts\` <= ? limit ${PLAFOND}`,
+    [sqlDate(from), sqlDate(to)],
+  );
+}
+
 export async function getStats(fromISO: string, toISO: string): Promise<StatsResult> {
-  if (!hasSupabase()) return empty;
-  const sb = supabaseAdmin();
+  if (!hasDb()) return empty;
   const from = new Date(fromISO);
   const to = new Date(toISO);
 
-  const { data: visits } = await sb
-    .from(VISITS)
-    .select("ts,path,referrer,type,visitor")
-    .gte("ts", from.toISOString())
-    .lte("ts", to.toISOString())
-    .limit(50000);
-  const rows = visits ?? [];
+  const rows = await visitesEntre(from, to);
 
   const views = rows.filter((r) => r.type === "view");
   const carts = rows.filter((r) => r.type === "cart_add");
@@ -283,35 +408,40 @@ export interface VisitorRow {
 }
 
 export async function getVisitors(limit = 50): Promise<VisitorRow[]> {
-  if (!hasSupabase()) return [];
-  const sb = supabaseAdmin();
-  let brut: unknown = null;
-  if (colonneSource) {
-    const r = await sb
-      .from(VISITORS)
-      .select("id,count,last_path,last_seen,ip,city,source")
-      .order("last_seen", { ascending: false })
-      .limit(limit);
-    if (r.error) colonneSource = false; // migration pas encore jouée
-    else brut = r.data;
-  }
-  if (!brut) {
-    const r = await sb
-      .from(VISITORS)
-      .select("id,count,last_path,last_seen,ip,city")
-      .order("last_seen", { ascending: false })
-      .limit(limit);
-    brut = r.data;
-  }
+  if (!hasDb()) return [];
+  /* ⚠️ Interpolé, pas paramétré : `limit ?` n'est pas accepté par toutes les
+     versions de MySQL en requête préparée. On force donc un entier borné —
+     la valeur ne vient jamais de l'extérieur, mais le jour où ce serait le
+     cas, ce serait une injection. */
+  const n = Math.min(Math.max(Math.trunc(Number(limit) || 50), 1), 500);
+
   type Ligne = {
-    id: string; count: number; last_path?: string | null; last_seen: string;
+    id: string; count: number; last_path?: string | null; last_seen: Date | string;
     ip?: string | null; city?: string | null; source?: string | null;
   };
-  return ((brut ?? []) as Ligne[]).map((v) => ({
+  let brut: Ligne[] = [];
+  if (colonneSource) {
+    try {
+      brut = await q<Ligne>(
+        `select \`id\`,\`count\`,\`last_path\`,\`last_seen\`,\`ip\`,\`city\`,\`source\`
+         from \`${VISITORS}\` order by \`last_seen\` desc limit ${n}`,
+      );
+    } catch {
+      colonneSource = false; // migration pas encore jouée
+    }
+  }
+  if (!colonneSource) {
+    brut = await q<Ligne>(
+      `select \`id\`,\`count\`,\`last_path\`,\`last_seen\`,\`ip\`,\`city\`
+       from \`${VISITORS}\` order by \`last_seen\` desc limit ${n}`,
+    );
+  }
+
+  return brut.map((v) => ({
     id: v.id,
     count: v.count,
     lastPath: v.last_path ?? "—",
-    lastSeen: v.last_seen,
+    lastSeen: new Date(v.last_seen).toISOString(),
     ip: v.ip ?? "—",
     city: v.city ?? "—",
     source: v.source ?? undefined,
@@ -377,18 +507,11 @@ export async function getFunnel(
   fromISO: string,
   toISO: string,
 ): Promise<FunnelResult> {
-  if (!hasSupabase()) return emptyFunnel;
-  const sb = supabaseAdmin();
+  if (!hasDb()) return emptyFunnel;
   const from = new Date(fromISO);
   const to = new Date(toISO);
 
-  const { data } = await sb
-    .from(VISITS)
-    .select("path,type,visitor")
-    .gte("ts", from.toISOString())
-    .lte("ts", to.toISOString())
-    .limit(50000);
-  const rows = data ?? [];
+  const rows = await visitesEntre(from, to);
 
   /** Visiteurs distincts vérifiant un critère. */
   const uniques = (
@@ -396,7 +519,7 @@ export async function getFunnel(
   ) =>
     new Set(
       rows
-        .filter((r) => predicate(r as { path: string | null; type: string | null }))
+        .filter((r) => predicate(r))
         .map((r) => r.visitor)
         .filter(Boolean),
     ).size;
@@ -491,21 +614,19 @@ export async function getTopProduits(
   };
 
   // ── Ajouts au panier ──
-  if (hasSupabase()) {
-    const { data } = await supabaseAdmin()
-      .from(VISITS)
-      .select("path,visitor")
-      .eq("type", "cart_add")
-      .gte("ts", new Date(fromISO).toISOString())
-      .lte("ts", new Date(toISO).toISOString())
-      .limit(50000);
+  if (hasDb()) {
+    const data = await q<{ path: string | null; visitor: string | null }>(
+      `select \`path\`,\`visitor\` from \`${VISITS}\`
+       where \`type\` = 'cart_add' and \`ts\` >= ? and \`ts\` <= ? limit ${PLAFOND}`,
+      [sqlDate(new Date(fromISO)), sqlDate(new Date(toISO))],
+    );
     const visiteurs = new Map<string, Set<string>>();
-    for (const r of data ?? []) {
-      const slug = r.path as string | null;
+    for (const r of data) {
+      const slug = r.path;
       if (!slug) continue;
       ligne(slug).ajouts += 1;
       if (!visiteurs.has(slug)) visiteurs.set(slug, new Set());
-      if (r.visitor) visiteurs.get(slug)!.add(r.visitor as string);
+      if (r.visitor) visiteurs.get(slug)!.add(r.visitor);
     }
     for (const [slug, set] of visiteurs) ligne(slug).personnes = set.size;
   }

@@ -1,13 +1,12 @@
 import "server-only";
 import { promises as fs } from "fs";
 import path from "path";
-import os from "os";
-import { hasSupabase, supabaseAdmin } from "@/lib/supabase/server";
+import { hasDb, q, exec, pool, estDoublon, sqlDate } from "@/lib/db/mysql";
 import { store } from "@/config/store.config";
 
 /**
  * Stockage clé→valeur (JSON) durable.
- * - Si Supabase est configuré : table Postgres `<prefix>_kv` (durable, partagé). ✅
+ * - Si la base est configurée : table MySQL `<prefix>_kv` (durable, partagée). ✅
  * - Sinon (dev local sans env) : fichiers JSON (repli).
  *
  * Les actions (`lib/actions/*`) utilisent read/write sans se soucier du backend.
@@ -16,21 +15,35 @@ import { store } from "@/config/store.config";
 const KV = store.db.kv;
 
 export async function read<T>(name: string, seed: T): Promise<T> {
-  if (hasSupabase()) {
-    const sb = supabaseAdmin();
-    const { data } = await sb.from(KV).select("value").eq("key", name).maybeSingle();
-    if (data) return data.value as T;
-    await sb.from(KV).upsert({ key: name, value: seed });
+  if (hasDb()) {
+    const rows = await q<{ value: string }>(
+      `select \`value\` from \`${KV}\` where \`key\` = ? limit 1`,
+      [name],
+    );
+    if (rows.length) return JSON.parse(rows[0].value) as T;
+    /* `insert ignore` et non `insert` : deux requêtes servies en parallèle
+       peuvent semer la même clé en même temps, et la seconde ne doit pas
+       remonter une erreur pour une valeur qui est de toute façon la bonne. */
+    await exec(
+      `insert ignore into \`${KV}\` (\`key\`, \`value\`) values (?, ?)`,
+      [name, JSON.stringify(seed)],
+    );
     return seed;
   }
   return fileRead(name, seed);
 }
 
 export async function write<T>(name: string, data: T): Promise<void> {
-  if (hasSupabase()) {
-    await supabaseAdmin()
-      .from(KV)
-      .upsert({ key: name, value: data, updated_at: new Date().toISOString() });
+  if (hasDb()) {
+    const json = JSON.stringify(data);
+    /* ⚠️ `values(...)` dans la clause de mise à jour est DÉPRÉCIÉ par MySQL 8
+       et absent de certaines versions de MariaDB. On repasse le paramètre
+       plutôt que de dépendre d'une syntaxe qui diffère selon le moteur. */
+    await exec(
+      `insert into \`${KV}\` (\`key\`, \`value\`, \`updated_at\`) values (?, ?, ?)
+       on duplicate key update \`value\` = ?, \`updated_at\` = ?`,
+      [name, json, sqlDate(), json, sqlDate()],
+    );
     return;
   }
   return fileWrite(name, data);
@@ -42,19 +55,28 @@ export async function write<T>(name: string, data: T): Promise<void> {
  * `read` puis `write` ne suffisent pas à garantir l'unicité : la page de retour
  * du client et le webhook du PSP arrivent quasiment en même temps, lisent tous
  * les deux « pas encore traité » et créent tous les deux la commande. Ici on
- * s'appuie sur l'unicité de la clé primaire Postgres — la seconde insertion
- * échoue, c'est le seul point de synchronisation fiable entre deux requêtes
- * servies par des instances différentes.
+ * s'appuie sur l'unicité de la clé primaire MySQL — la seconde insertion
+ * échoue avec `ER_DUP_ENTRY`, c'est le seul point de synchronisation fiable
+ * entre deux requêtes servies par des processus différents.
  *
  * @returns true si le verrou a été obtenu, false s'il était déjà pris.
  */
 export async function acquireLock(name: string): Promise<boolean> {
   const key = `lock_${name}`;
-  if (hasSupabase()) {
-    const { error } = await supabaseAdmin()
-      .from(KV)
-      .insert({ key, value: { at: new Date().toISOString() } });
-    return !error; // erreur = clé déjà présente (violation d'unicité)
+  if (hasDb()) {
+    try {
+      await exec(
+        `insert into \`${KV}\` (\`key\`, \`value\`) values (?, ?)`,
+        [key, JSON.stringify({ at: new Date().toISOString() })],
+      );
+      return true;
+    } catch (e) {
+      /* ⚠️ Ne renvoyer `false` que sur un DOUBLON. Une base injoignable
+         produirait sinon un « verrou déjà pris » permanent : plus aucune
+         commande ne serait enregistrée, en silence. */
+      if (estDoublon(e)) return false;
+      throw e;
+    }
   }
   await ensureDir();
   try {
@@ -69,8 +91,8 @@ export async function acquireLock(name: string): Promise<boolean> {
 /** Libère un verrou — à n'appeler que si le traitement a ÉCHOUÉ, pour laisser une nouvelle tentative possible. */
 export async function releaseLock(name: string): Promise<void> {
   const key = `lock_${name}`;
-  if (hasSupabase()) {
-    await supabaseAdmin().from(KV).delete().eq("key", key);
+  if (hasDb()) {
+    await exec(`delete from \`${KV}\` where \`key\` = ?`, [key]);
     return;
   }
   try {
@@ -80,11 +102,20 @@ export async function releaseLock(name: string): Promise<void> {
   }
 }
 
+/** Ferme le pool — utilisé par les scripts, jamais par l'application. */
+export async function closeDb(): Promise<void> {
+  if (hasDb()) await pool().end();
+}
+
 /* ─────────── Repli fichier (dev local) ─────────── */
 
-const DATA_DIR = process.env.VERCEL
-  ? path.join(os.tmpdir(), `${store.prefix}-data`)
-  : path.join(process.cwd(), "data");
+/**
+ * ⚠️ Repli de DÉVELOPPEMENT uniquement. Chez Hostinger le disque est bien
+ * inscriptible, mais un déploiement REMPLACE le contenu du site : des
+ * commandes écrites ici disparaîtraient à la mise en ligne suivante. En
+ * production, la base est obligatoire.
+ */
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 
 async function ensureDir() {
   try {

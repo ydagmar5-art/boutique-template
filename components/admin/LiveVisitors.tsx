@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
+import { presenceEnLigne } from "@/lib/actions/analytics";
 import { store } from "@/config/store.config";
 import { SOURCE_LABEL, type SourceVente } from "@/lib/attribution";
 import { amorcer, etatAudio, jouerCarillon, type EtatAudio } from "@/components/admin/carillon";
 
 /** Au-delà, une visiteuse est considérée partie — 3 battements manqués. */
-const PERIME = 50_000;
+const PERIME = store.presence.perime * 1000;
+
+/**
+ * Cadence de relecture de la table de présence.
+ *
+ * ⚠️ Doit rester nettement inférieure au battement du Tracker (15 s), sinon
+ * une visiteuse arrivée juste après un sondage n'apparaît qu'une demi-minute
+ * plus tard — et le carillon sonne pour quelqu'un qui est déjà reparti.
+ */
+const SONDAGE = 8_000;
 
 interface Online {
   id: string;
@@ -81,36 +90,35 @@ export default function LiveVisitors() {
   }, []);
 
   useEffect(() => {
-    const sb = supabaseBrowser();
-    if (!sb) return;
-    // clé "admin" pour observer sans être compté comme visiteur boutique
-    const channel = sb.channel(store.realtimeChannel, {
-      config: { presence: { key: "admin-" + Math.random().toString(36).slice(2, 8) } },
-    });
+    let vivant = true;
 
-    const sync = () => {
-      const state = channel.presenceState<Online>();
-      const list: Online[] = [];
-      for (const key of Object.keys(state)) {
-        if (key.startsWith("admin-")) continue; // exclut les admins
-        const metas = state[key] as unknown as Online[];
-        if (!metas?.length) continue;
-        // Une même clé peut avoir plusieurs connexions (onglets/reloads) : on
-        // garde la plus récente pour refléter la page actuelle.
-        const meta = metas.reduce((a, b) => (b.since > a.since ? b : a));
-        list.push(meta);
+    /*
+      ── SONDAGE, ET NON TEMPS RÉEL ──
+
+      Il n'y a pas de websocket : le navigateur de chaque visiteuse écrit un
+      battement en base, celui-ci relit la table. La conséquence à connaître :
+      une arrivée se voit avec au plus SONDAGE de retard, jamais instantanément.
+
+      ⚠️ Ce sont les lignes PÉRIMÉES qui font partir une visiteuse, pas un
+      événement de départ — un onglet fermé brutalement, une veille ou une
+      coupure réseau n'en émettent aucun. Trois battements manqués suffisent.
+    */
+    const sync = async () => {
+      let liste: Online[];
+      try {
+        liste = (await presenceEnLigne()) as Online[];
+      } catch {
+        /* Réseau coupé ou session expirée : on garde l'affichage précédent
+           plutôt que de vider la liste, ce qui se lirait comme « plus
+           personne sur la boutique ». */
+        return;
       }
-      list.sort((a, b) => b.since - a.since);
+      if (!vivant) return;
+      setConnected(true);
 
-      /*
-        ⚠️ FANTÔMES. Supabase n'émet pas toujours l'événement `leave` : un
-        onglet fermé brutalement, une veille ou une coupure réseau laissent
-        la clé de présence en place. On écarte donc quiconque n'a pas donné
-        signe de vie depuis PERIME — le battement du Tracker rafraîchit
-        `since` toutes les 15 s, trois battements manqués suffisent à
-        conclure au départ.
-      */
-      const vivantes = list.filter((v) => Date.now() - v.since < PERIME);
+      const vivantes = liste
+        .filter((v) => Date.now() - v.since < PERIME)
+        .sort((a, b) => b.since - a.since);
 
       /* Une visiteuse est « nouvelle » si on ne l'a pas vue depuis OUBLI.
          ⚠️ Aligné sur PERIME : quelqu'un écarté de la liste puis revenu doit
@@ -140,27 +148,12 @@ export default function LiveVisitors() {
       setOnline(vivantes);
     };
 
-    channel
-      .on("presence", { event: "sync" }, sync)
-      .on("presence", { event: "join" }, sync)
-      .on("presence", { event: "leave" }, sync)
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setConnected(true);
-          channel.track({ id: "admin", path: "/admin", count: 0, since: Date.now() });
-        }
-      });
-
-    /*
-      La présence ne bouge plus quand personne n'arrive ni ne part : sans ce
-      minuteur, un fantôme resterait affiché jusqu'au prochain événement — ou
-      jusqu'au rechargement de la page, ce qui était le symptôme signalé.
-    */
-    const balayage = window.setInterval(sync, 8_000);
+    sync();
+    const balayage = window.setInterval(sync, SONDAGE);
 
     return () => {
+      vivant = false;
       window.clearInterval(balayage);
-      sb.removeChannel(channel);
     };
   }, []);
 
@@ -213,7 +206,7 @@ export default function LiveVisitors() {
       </div>
 
       {!connected ? (
-        <p className="text-sm text-muted">Connexion au temps réel…</p>
+        <p className="text-sm text-muted">Relevé en cours…</p>
       ) : online.length === 0 ? (
         <p className="text-sm text-muted">Personne sur la boutique en ce moment.</p>
       ) : (
@@ -240,7 +233,8 @@ export default function LiveVisitors() {
         </ul>
       )}
       <p className="mt-3 text-xs text-muted">
-        Mise à jour instantanée — la page qu&apos;ils regardent en temps réel.
+        Actualisé toutes les {Math.round(SONDAGE / 1000)} secondes — la page
+        qu&apos;ils regardent en ce moment.
       </p>
       {son && (
         <p className="mt-1 text-xs text-muted">

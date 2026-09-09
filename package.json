@@ -7,15 +7,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "@airwallex/components-sdk": "^1.32.0",
     "@stripe/react-stripe-js": "^6.8.0",
     "@stripe/stripe-js": "^9.12.0",
-    "@supabase/supabase-js": "^2.110.8",
     "jquery": "^3.7.1",
+    "mysql2": "^3.24.4",
     "next": "^15.5.19",
+    "nodemailer": "^10.0.1",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "server-only": "^0.0.1",
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@types/jquery": "^4.0.1",
     "@types/node": "22.10.7",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
     "autoprefixer": "10.4.20",

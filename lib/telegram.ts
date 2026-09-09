@@ -17,7 +17,7 @@ import { SOURCE_LABEL, type SourceVente } from "@/lib/attribution";
  * débité. L'appelant l'enveloppe d'ailleurs dans un `allSettled`.
  *
  * ⚠️ Sans `TELEGRAM_BOT_TOKEN` ni `TELEGRAM_CHAT_ID`, l'envoi est neutralisé
- * en silence (même politique que Resend) : une boutique clonée sans ces
+ * en silence (même politique que le SMTP) : une boutique clonée sans ces
  * variables ne doit pas cracher d'erreurs à chaque vente.
  */
 
@@ -120,7 +120,7 @@ export async function sendTelegramSale(order: Order): Promise<{ ok: boolean }> {
  *
  * Réservée aux situations qu'un journal serveur ne suffit pas à traiter :
  * typiquement un paiement encaissé que la boutique n'a pas su transformer en
- * commande. Personne ne lit les journaux de Vercel ; un message sur le
+ * commande. Personne ne lit les journaux du serveur ; un message sur le
  * téléphone, si.
  *
  * ⚠️ Même politique que `sendTelegramSale` : ne lève jamais, et se neutralise

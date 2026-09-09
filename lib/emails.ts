@@ -1,4 +1,5 @@
 import "server-only";
+import nodemailer, { type Transporter } from "nodemailer";
 import { brand } from "@/config/brand.config";
 import { formatPrice } from "@/lib/products";
 import type { Order, OrderItem } from "@/lib/db/seed";
@@ -23,35 +24,70 @@ import { SOURCE_LABEL, type SourceVente } from "@/lib/attribution";
  * feuille de style externe ou une variable CSS y disparaît sans bruit.
  */
 
-const KEY = process.env.RESEND_API_KEY;
-const FROM = process.env.EMAIL_FROM || `${brand.name} <onboarding@resend.dev>`;
+/**
+ * ── ENVOI PAR SMTP HOSTINGER ──
+ *
+ * La boîte de la boutique est créée chez Hostinger (`hostinger mail
+ * mailboxes create-mailbox`), et le serveur sortant est celui de l'hébergeur.
+ * Aucun service tiers, aucune clé d'API : les identifiants sont ceux de la
+ * boîte elle-même.
+ *
+ * ⚠️ SPF, DKIM et DMARC sont posés automatiquement quand la ZONE DNS DU
+ * DOMAINE est chez Hostinger. Si le domaine est resté chez un autre bureau
+ * d'enregistrement, ces trois enregistrements sont à recopier à la main —
+ * sans eux, les confirmations de commande partent en indésirables, et c'est
+ * la panne la plus coûteuse et la moins visible de toute la boutique.
+ *
+ * ⚠️ L'ADRESSE D'EXPÉDITION DOIT ÊTRE CELLE DE LA BOÎTE AUTHENTIFIÉE. Un
+ * `EMAIL_FROM` qui ne correspond pas à `SMTP_USER` est refusé par le serveur
+ * (« sender address rejected ») — pas mis en indésirable : refusé.
+ */
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
+const FROM =
+  process.env.EMAIL_FROM || (SMTP_USER ? `${brand.name} <${SMTP_USER}>` : "");
 const REPLY_TO = brand.contact.email;
 const MERCHANT = process.env.MERCHANT_EMAIL || brand.contact.email;
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || "";
 
-/** Envoi bas niveau via Resend. Ne lève jamais. */
+let transport: Transporter | null = null;
+
+function transporteur(): Transporter | null {
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASSWORD) return null;
+  if (!transport) {
+    transport = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      /* 465 = TLS implicite (le port recommandé par Hostinger), 587 = STARTTLS. */
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASSWORD },
+      /* Une connexion réutilisée : ouvrir une session SMTP par e-mail est
+         lent, et les serveurs mutualisés limitent les connexions simultanées. */
+      pool: true,
+      maxConnections: 2,
+    });
+  }
+  return transport;
+}
+
+/** Envoi bas niveau par SMTP. Ne lève jamais. */
 async function sendEmail(opts: { to: string; subject: string; html: string }) {
   if (!opts.to) return { ok: false, skipped: true };
-  if (!KEY) {
-    console.warn("[email] RESEND_API_KEY absent — non envoyé :", opts.subject);
+  const t = transporteur();
+  if (!t) {
+    console.warn("[email] SMTP non configuré — non envoyé :", opts.subject);
     return { ok: false, skipped: true };
   }
   try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: FROM,
-        to: [opts.to],
-        reply_to: REPLY_TO,
-        subject: opts.subject,
-        html: opts.html,
-      }),
+    await t.sendMail({
+      from: FROM,
+      to: opts.to,
+      replyTo: REPLY_TO,
+      subject: opts.subject,
+      html: opts.html,
     });
-    if (!res.ok) {
-      console.error("[email] échec", res.status, await res.text());
-      return { ok: false };
-    }
     return { ok: true };
   } catch (e) {
     console.error("[email]", e);

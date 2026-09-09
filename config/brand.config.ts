@@ -223,8 +223,8 @@ export const brand: BrandConfig = {
   ],
 
   contact: {
-    // Domaine vérifié dans Resend, et servant aussi de `reply-to` sur tous
-    // les e-mails transactionnels.
+    // Adresse de la boutique, servant de `reply-to` sur tous les e-mails
+    // transactionnels.
     // ⚠️ Une boîte (ou un alias) DOIT exister derrière cette adresse : les
     // réponses des clientes y arrivent, et une adresse qui rebondit fait
     // chuter la réputation d'envoi du domaine entier.
@@ -277,10 +277,12 @@ export const brand: BrandConfig = {
     director: "À RENSEIGNER — dirigeant",
     email: "contact@exemple.com",
     phone: "",
+    // ⚠️ Obligation légale (art. 6 III LCEN) : le nom et l'adresse de
+    // l'hébergeur RÉEL. À corriger si la boutique part ailleurs.
     host: {
-      name: "Vercel Inc.",
-      address: "340 S Lemon Ave #4133, Walnut, CA 91789, États-Unis",
-      url: "https://vercel.com",
+      name: "Hostinger International Ltd",
+      address: "61 Lordou Vironos Street, 6023 Larnaca, Chypre",
+      url: "https://www.hostinger.fr",
     },
   },
 };

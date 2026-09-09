@@ -9,7 +9,7 @@
 > « Leçons de Maison Romy Paris ». Les lire avant de brancher un PSP : chacun
 > vient d'un défaut qui a atteint un site en ligne.
 
-> Moteur e-commerce white-label. Next.js 15 (App Router, TS, Tailwind v3) · Supabase Postgres · Vercel.
+> Moteur e-commerce white-label. Next.js 15 (App Router, TS, Tailwind v3) · MySQL et hébergement Node.js **Hostinger**.
 > **Ce dossier ne se déploie pas.** On le clone pour créer une boutique.
 > Origine : extrait d'une boutique en production en juillet 2026, après validation en production.
 
@@ -20,7 +20,8 @@
 **Le client ne code pas et n'édite aucun fichier.** Il décrit la boutique qu'il veut ; tout le reste est ton travail, y compris l'infrastructure. Il répond en français, valide un plan avant les changements importants, et veut une vérification navigateur avant toute annonce de succès.
 
 **Règles de travail :**
-1. Après chaque modification : `npx tsc --noEmit` → `npm run build` → `vercel --prod --yes`.
+1. Après chaque modification : `npx tsc --noEmit` → `npm run build` → `npm run deploy -- --domain <domaine>`.
+   ⚠️ Le `build` local ne déploie rien : Hostinger reconstruit à partir de l'archive. Il sert à attraper les erreurs avant de perdre dix minutes sur une construction distante.
 2. Vérifier dans le navigateur **en texte** (`get_page_text`, `read_page`, `javascript_tool`). Les captures d'écran coûtent cher — n'en prendre que pour un rendu visuel réellement en question.
 3. Commits sous l'identité git configurée pour la boutique, jamais l'adresse personnelle du client.
 4. Ne jamais annoncer qu'une chose fonctionne sans l'avoir constatée.
@@ -73,14 +74,17 @@ C'est le vrai risque du « copie tel site » : une vitrine refaite de zéro a l'
 ## 3. Architecture
 
 - **Catalogue** : `Product.hidden` retire un produit de la boutique (listes + fiche en **404**) sans le supprimer — bouton *Masquer/Afficher* dans `/admin/products`. La vitrine passe par `listVisibleProducts()` / `getVisibleProduct()`, le back-office par `listProducts()` (qui voit tout). ⚠️ Une vitrine réécrite qui appellerait `listProducts()` **afficherait les produits masqués**.
-- **Photos produit** : `components/admin/ImageUploader.tsx` (glisser-déposer, réordonnancement, 1ʳᵉ image = principale). Le navigateur convertit en WebP 1600 px avant l'envoi ; `next.config.mjs` relève `serverActions.bodySizeLimit` à 10 Mo. Stockage : `lib/db/media.ts` → bucket Supabase **`<prefix>-media`**, créé au premier upload, repli `public/uploads` en dev. ⚠️ Le bucket est **préfixé comme les tables** : un bucket commun ferait apparaître les photos d'une boutique dans le back-office d'une autre.
+- **Photos produit** : `components/admin/ImageUploader.tsx` (glisser-déposer, réordonnancement, 1ʳᵉ image = principale). Le navigateur convertit en WebP 1600 px avant l'envoi ; `next.config.mjs` relève `serverActions.bodySizeLimit` à 10 Mo. Stockage : `lib/db/media.ts` → dossier `MEDIA_DIR`, servi par la route `app/media/[name]`. ⚠️ **`MEDIA_DIR` doit être HORS de `public_html`** (`/home/<compte>/media/<prefixe>`) : un déploiement Hostinger remplace tout le contenu du site, et les photos écrites dans l'application disparaîtraient à la mise en ligne suivante. Une par boutique, comme les tables — un dossier commun ferait apparaître les photos d'une boutique dans le back-office d'une autre.
 - **Galerie fiche produit** : `components/shop/ProductGallery.tsx` affiche **toutes** les photos (vignettes, flèches, clavier). Cadre fixe **portrait 3/4** en `object-cover`, choisi parce que c'est le format de sortie le plus courant des photos produit. ⚠️ Les photos très allongées (9/16) perdent ~26 % de hauteur : **cadrer le sujet au centre**. Même contrainte sur `ProductCard` (cover 4/5) → la **1ʳᵉ photo doit être en portrait**.
-- **Données = JSON en base**, pas de schéma relationnel : `lib/db/store.ts` `read/write` → table `<prefix>_kv (key, value jsonb)`. Repli fichier `./data` si Supabase n'est pas configuré. Clés : `products`, `orders`, `customers`, `users`, `gateways`, `pixels`, `categories`, `pending_*`, `lock_*`.
+- **Données = JSON en base**, pas de schéma relationnel : `lib/db/store.ts` `read/write` → table `` `<prefix>_kv` (`key`, `value` longtext) ``. Repli fichier `./data` si la base n'est pas configurée (dev uniquement). ⚠️ `key` est un mot réservé de MySQL : accents graves obligatoires dans toute requête écrite à la main. Clés : `products`, `orders`, `customers`, `users`, `gateways`, `pixels`, `categories`, `pending_*`, `lock_*`.
 - **Actions serveur** : `lib/actions/{products,orders,categories,settings,pixels,auth,analytics,checkout}.ts`.
-- **Analytics** : tables `<prefix>_visits` et `<prefix>_visitors` (vrai schéma SQL, pas du KV) + présence temps réel Supabase. Schéma versionné dans `supabase/schema.sql` (RLS activée, **aucune policy** : seule la clé service role accède aux données — ajouter une policy de lecture publique exposerait les commandes et les clients).
-- ⚠️ **Le projet Supabase est PARTAGÉ** entre les boutiques *et une application sans rapport*. Toute requête SQL doit filtrer sur le préfixe. Jamais de `drop`/`truncate` global.
+- **Analytics** : tables `<prefix>_visits`, `<prefix>_visitors` et `<prefix>_presence` (vrai schéma SQL, pas du KV). Schéma versionné dans `db/schema.sql`. La base n'est jamais exposée au navigateur : tout passe par des actions serveur, et `presenceEnLigne()` exige une session **admin** — elle renvoie des adresses IP, et une action serveur est une URL publique comme une autre.
+- **Présence « en direct » = SONDAGE, pas temps réel.** Il n'existe pas d'équivalent de Supabase Realtime chez Hostinger : le navigateur écrit un battement toutes les 15 s (`battrePresence`), le back-office relit la table toutes les 8 s. Une arrivée se voit donc avec quelques secondes de retard, et c'est le SILENCE — pas un événement de départ — qui fait conclure au départ.
+- ⚠️ **La base MySQL est PARTAGÉE** entre les boutiques d'un même hébergement. Toute requête doit filtrer sur le préfixe. Jamais de `drop`/`truncate` global.
+- ⚠️ **Le pool est bridé à 4 connexions** (`lib/db/mysql.ts`). Un hébergement mutualisé n'en accorde que quelques dizaines pour TOUT le compte : un pool généreux fait tomber les autres boutiques avec `ER_CON_COUNT_ERROR`, une erreur qui ressemble à une panne de la base et non à un réglage.
 - ⚠️ `"use server"` = **uniquement des fonctions async exportées**. Une constante exportée dans un tel fichier fait échouer le build (mettre les constantes à part, ex. `lib/pixels-types.ts`).
-- ⚠️ Postgres réordonne les clés d'un `jsonb`. `read()` ne re-seede que si la clé est **absente** → pour rejouer un seed, supprimer la clé en base.
+- ⚠️ `read()` ne re-seede que si la clé est **absente** → pour rejouer un seed, supprimer la clé en base.
+- ⚠️ **Tous les instants sont en UTC**, y compris ceux posés par les valeurs par défaut du schéma : le pool force `set time_zone = '+00:00'` à chaque connexion. Sans cela, une même table mélangerait des instants UTC écrits par l'application et des instants locaux posés par la base.
 
 ---
 
@@ -135,17 +139,17 @@ Le mode est **déduit** : config publique exploitable → `embedded`, sinon → 
 **Le plus simple : la skill `/new-store`**, qui déroule tout ce qui suit. Sinon, à la main :
 
 **Automatisable (à faire) :**
-1. `node scripts/create-store.mjs --prefix <p> --name "<Nom>" --dir <chemin>` — copie le modèle, écrit le préfixe, crée les 3 tables Supabase, initialise git avec le modèle en amont (`upstream`) et génère `.env.local` avec un `AUTH_SECRET`
+1. `node scripts/create-store.mjs --prefix <p> --name "<Nom>" --dir <chemin>` — copie le modèle, écrit le préfixe, crée la base MySQL et ses 4 tables, initialise git avec le modèle en amont (`upstream`) et génère `.env.local` avec un `AUTH_SECRET`
 2. Compléter `.env.local`, puis `npm install`
-3. `config/brand.config.ts` — identité, palette, **mentions légales réelles**
+3. `config/brand.config.ts` — identité, palette, **mentions légales réelles** (dont l'hébergeur : Hostinger)
 4. `config/fonts.ts`, `components/site/Logo.tsx`
 5. Vitrine + catalogue + photos (WebP dans `public/products`)
-6. Projet Vercel + variables d'environnement (dont `AUTH_SECRET`, cf. §6)
-7. `npx tsc --noEmit` → `npm run build` → parcours complet en navigateur → `vercel --prod --yes`
+6. Site Hostinger : `hostinger hosting websites create --domain <d> --order-id <id>` (⚠️ asynchrone, quelques minutes)
+7. `npx tsc --noEmit` → `npm run build` → parcours complet en navigateur → `npm run deploy -- --domain <d> --env`
 
 **Manuel — le client doit s'en charger :**
-- Achat du nom de domaine
-- Vérification DNS du domaine dans Resend (sans quoi aucun e-mail ne part)
+- Achat du plan d'hébergement et du nom de domaine
+- Création de la boîte e-mail de la boutique s'il n'a pas de plan mail (`hostinger mail mailboxes create-mailbox`)
 - Ouverture des comptes PSP (liés à une entité légale)
 - Saisie des clés PSP dans `/admin/payments`
 
@@ -231,11 +235,11 @@ ne part jamais.
 - ⚠️ **Les iframes tierces (Stripe, Fondy) apparaissent VIDES sur les captures d'écran** après un zoom, un défilement ou un redimensionnement : le panneau ne les repeint pas. Ne jamais en conclure à une régression — mesurer la hauteur de l'iframe (`getBoundingClientRect().height`). Ce faux négatif a déjà fait accuser à tort une dépendance.
 - ⚠️ Un `<button>` dans un `<fieldset disabled>` est désactivé lui aussi — le sortir du fieldset.
 - ⚠️ **Ne rien superposer au conteneur d'un formulaire de paiement** (squelette en overlay, `display:none`) : il s'initialise dans un conteneur mal dimensionné et reste vide.
-- ⚠️ **Ajouter une colonne à une table déjà en service.** PostgREST rejette la requête ENTIÈRE quand on écrit dans une colonne inconnue. Une boutique dont la migration n'a pas encore été jouée cesse donc d'enregistrer ses visites — en silence, sans erreur visible, pour un simple ornement d'affichage. Tout code qui écrit une colonne récente doit tenter puis se désarmer (voir `colonneSource` dans `lib/actions/analytics.ts`). Et la clé de service ne permet PAS le DDL : la migration se joue à la main dans l'éditeur SQL de Supabase.
-- ⚠️ **`upsert` réécrit la ligne entière.** Sur `<prefix>_visitors`, l'origine du visiteur serait donc écrasée à chaque retour, et tout finirait attribué à « Direct ». Toute donnée de PREMIER contact doit être relue puis préservée explicitement avant l'écriture.
+- ⚠️ **Ajouter une colonne à une table déjà en service.** MySQL rejette la requête ENTIÈRE quand on écrit dans une colonne inconnue. Une boutique dont la migration n'a pas encore été jouée cesse donc d'enregistrer ses visites — en silence, sans erreur visible, pour un simple ornement d'affichage. Tout code qui écrit une colonne récente doit tenter puis se désarmer (voir `colonneSource` dans `lib/actions/analytics.ts`). Et l'application ne fait aucun DDL : la migration se joue à la main, en phpMyAdmin (`hostinger hosting databases phpmyadmin-link`) ou par une connexion distante autorisée.
+- ⚠️ **Une écriture d'agrégat écrase la ligne entière.** Sur `<prefix>_visitors`, l'origine du visiteur serait donc écrasée à chaque retour, et tout finirait attribué à « Direct ». Toute donnée de PREMIER contact se protège dans la requête elle-même : `source = coalesce(source, ?)`, jamais par une relecture suivie d'une réécriture (deux onglets ouverts ensemble se marcheraient dessus).
 - ⚠️ **Apple Pay et Google Pay : le piège du `www`.** Stripe n'affiche un portefeuille que sur un domaine ENREGISTRÉ, et `www.` est un sous-domaine distinct — « `www` is a subdomain that you must also register ». Quand la condition n'est pas remplie, **rien n'apparaît et aucune erreur n'est levée**. Vu en production : seul le domaine nu était déclaré alors que tout le trafic est redirigé en 308 vers `www`, donc Apple Pay était invisible pour 100 % des visiteuses. Contrôle : `curl -s https://api.stripe.com/v1/payment_method_domains -u "$STRIPE_SECRET_KEY:"`.
 - ⚠️ **Apple exige que la fenêtre de paiement s'ouvre sur un geste utilisateur**, sans code long avant. Si le tunnel fait des allers-retours serveur entre le clic « Payer » et `confirmPayment`, la fenêtre peut ne pas s'ouvrir. La réponse est l'Express Checkout Element, qui porte son propre bouton.
-- ⚠️ **Visiteuses fantômes en temps réel.** Supabase n'émet pas toujours l'événement `leave` : onglet fermé brutalement, veille, coupure réseau. La clé de présence restait et seul un rechargement nettoyait l'affichage. Corrigé : `Tracker` émet un battement toutes les 15 s qui rafraîchit `since`, et `LiveVisitors` écarte quiconque n'a rien émis depuis 50 s, en réévaluant toutes les 8 s. **Ne jamais faire dépendre l'affichage du seul événement `leave`.**
+- ⚠️ **Visiteuses fantômes.** Un onglet fermé brutalement, une veille ou une coupure réseau n'annoncent jamais un départ. `Tracker` émet donc un battement toutes les 15 s qui rafraîchit `since`, et `LiveVisitors` écarte quiconque n'a rien émis depuis 50 s, en relisant toutes les 8 s. **L'affichage ne doit jamais dépendre d'un signal de départ** — il n'en existe pas de fiable.
 - ⚠️ **Un son de notification ne se fait PAS avec un AudioContext.** Son autorisation est fragile : il retombe en « suspended » en arrière-plan ou après inactivité, et le réveil hors d'un geste est refusé — or c'est en arrière-plan qu'une notification sert. Utiliser un élément `<audio>` **amorcé pendant un clic** (joué puis mis en pause aussitôt) : il reste rejouable par programme ensuite. Et toujours afficher l'état, sinon un son bloqué est indiscernable d'un son jamais déclenché.
 - ⚠️ **Prix barré : règle des 30 jours.** `Product.compareAtPrice` est purement d'affichage — `price` reste le seul montant débité. Mais en France le prix de référence doit être le prix le plus bas réellement pratiqué dans les 30 jours précédents (art. L112-1-1, directive Omnibus) : un ancien prix inventé est une pratique commerciale trompeuse, et un motif classique de fermeture chez les PSP.
 - ⚠️ **Tester une commande envoie un vrai e-mail au gérant.** Renseigner `MERCHANT_EMAIL` dans `.env.local` pendant les tests.

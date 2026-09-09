@@ -135,7 +135,8 @@ export async function POST(req: Request) {
       faire ignorer le signal.
 
       ⚠️ NE JAMAIS REBRANCHER `sendTelegramAlert` ICI. Les incidents
-      techniques se lisent dans les journaux Vercel.
+      techniques se lisent dans le journal d'exécution de l'hébergement
+      (`hostinger hosting nodejs runtime-logs <compte> <domaine> --period 1h`).
 
       On journalise les NOMS d'en-têtes reçus, jamais leurs valeurs : la
       signature est un secret. C'est ce qui permet d'identifier l'en-tête

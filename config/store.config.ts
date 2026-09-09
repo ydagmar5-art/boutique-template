@@ -6,9 +6,9 @@
  * ║  `PREFIX` ci-dessous. Tout le reste s'en déduit.                 ║
  * ║                                                                  ║
  * ║  ⚠️ CE FICHIER N'EST PAS COSMÉTIQUE. Le préfixe isole les        ║
- * ║  données d'une boutique de celles des autres dans le MÊME projet ║
- * ║  Supabase. Deux boutiques qui partagent un préfixe partagent     ║
- * ║  leur catalogue, leurs commandes et leurs clients.               ║
+ * ║  données d'une boutique de celles des autres dans la MÊME base   ║
+ * ║  MySQL. Deux boutiques qui partagent un préfixe partagent leur   ║
+ * ║  catalogue, leurs commandes et leurs clients.                    ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
@@ -22,13 +22,15 @@ export const store = {
   prefix: PREFIX,
 
   /**
-   * Tables Postgres (Supabase). À créer AVANT le premier lancement —
-   * voir la checklist du TEMPLATE-HANDOFF, elles ne se créent pas seules.
+   * Tables MySQL (hébergement Hostinger). À créer AVANT le premier
+   * lancement — `db/schema.sql`, joué par `scripts/create-store.mjs`.
+   * Elles ne se créent pas seules au démarrage de l'application.
    */
   db: {
     kv: `${PREFIX}_kv`,
     visits: `${PREFIX}_visits`,
     visitors: `${PREFIX}_visitors`,
+    presence: `${PREFIX}_presence`,
   },
 
   /**
@@ -46,8 +48,19 @@ export const store = {
     cart: `${PREFIX}-cart`,
   },
 
-  /** Canal Supabase Realtime pour la présence des visiteurs en direct. */
-  realtimeChannel: `${PREFIX}-live`,
+  /**
+   * Présence « en direct » du back-office, en secondes.
+   *
+   * ⚠️ Les deux valeurs sont liées : `battement` est la cadence à laquelle
+   * le navigateur signale qu'il est toujours là, `perime` le délai au-delà
+   * duquel on considère la visiteuse partie. `perime` doit valoir au moins
+   * trois battements — sinon un simple retard réseau la fait disparaître,
+   * puis réapparaître, et le carillon sonne à chaque aller-retour.
+   */
+  presence: {
+    battement: 15,
+    perime: 50,
+  },
 
   /**
    * Numérotation des commandes.
