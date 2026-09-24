@@ -1,9 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getGatewayConfig } from "@/lib/payments/gateway-store";
-import { read } from "@/lib/db/store";
-import { sendTelegramAlert } from "@/lib/telegram";
+import { read, write, listByPrefix } from "@/lib/db/store";
+import { createOrderOnce } from "@/lib/payments/finalize";
+import { createOrder } from "@/lib/actions/orders";
+import type { CheckoutDraft } from "@/lib/actions/checkout";
 import type { Order } from "@/lib/db/seed";
+
+// Le webhook attend quelques secondes avant de créer une commande manquante.
+export const maxDuration = 30;
 
 /** Même clé que `lib/actions/orders.ts` (constante locale là-bas). */
 const ORDERS = "orders";
@@ -183,13 +188,15 @@ export async function POST(req: Request) {
 
   const commandes = await read<Order[]>(ORDERS, []);
   const recemment = Date.now() - 6 * 60 * 60 * 1000;
-  const dejaConnue = commandes.some((c) => {
-    if (c.pspRef === paiementId) return true;
-    if (!emailMeta || (c.email ?? "").trim().toLowerCase() !== emailMeta) return false;
-    // Une commande du même client, créée dans les six dernières heures.
-    const t = Date.parse(c.date ?? "");
-    return !Number.isFinite(t) || t >= recemment;
-  });
+  const commandeConnue = (liste: Order[]) =>
+    liste.some((c) => {
+      if (c.pspRef === paiementId) return true;
+      if (!emailMeta || (c.email ?? "").trim().toLowerCase() !== emailMeta) return false;
+      // Une commande du même client, créée dans les six dernières heures.
+      const t = Date.parse(c.date ?? "");
+      return !Number.isFinite(t) || t >= recemment;
+    });
+  const dejaConnue = commandeConnue(await read<Order[]>(ORDERS, []));
   if (dejaConnue) {
     return NextResponse.json({ ok: true, deja: true });
   }
@@ -215,10 +222,103 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, ignore: "sans clé de rapprochement" });
   }
 
-  await sendTelegramAlert(
-    `⚠️ Whop a encaissé SANS commande enregistrée — paiement ${paiementId} (${type}). ` +
-      "Aucune commande ne le référence : vérifiez dans Whop et créez la commande à la main avant de livrer.",
-  ).catch(() => {});
+  /*
+    ╔════════════════════════════════════════════════════════════════╗
+    ║  FILET DE SÉCURITÉ — le webhook CRÉE la commande manquante      ║
+    ╚════════════════════════════════════════════════════════════════╝
 
-  return NextResponse.json({ ok: true, orpheline: true });
+    Incident réel : une cliente a été débitée sans qu'aucune
+    commande soit enregistrée, ni confirmation envoyée. La commande n'était
+    créée QUE par la page de la cliente après paiement (onCheckoutComplete →
+    payWhop) : onglet fermé, redirection 3-D Secure, réseau coupé, et la vente
+    était perdue en silence.
+
+    Désormais, quand Whop confirme un paiement sans commande correspondante :
+      1. on attend 6 s — dans le cas normal, la page de la cliente a fini
+         d'enregistrer la commande entre-temps ;
+      2. on revérifie (même e-mail, moins de 6 h) — sinon on ne fait rien ;
+      3. on reprend le brouillon enregistré au démarrage du paiement
+         (`pending_whop_*`, même e-mail, non payé, moins de 24 h) ;
+      4. le MONTANT encaissé par Whop doit égaler le panier (±1 centime),
+         sinon rien n'est créé — même garde-fou que payWhop ;
+      5. création par `createOrder`, qui envoie la confirmation à la cliente,
+         l'e-mail au gérant et la notification Telegram de commande.
+
+    ⚠️ PAS d'alerte Telegram « encaissé sans commande » (décision du gérant) :
+    les cas non rattrapés sont seulement journalisés.
+  */
+  /*
+    ⚠️ ATTENTE RAMENÉE DE 6 s À 2 s (20/09/2026).
+
+    Cette pause existe pour laisser la page de la cliente créer la commande
+    elle-même dans le cas normal. Six secondes, c'était six secondes de plus
+    devant un écran d'attente quand le rappel de Whop se perd — et il se perd.
+    Deux secondes suffisent : le double n'est de toute façon pas possible,
+    `createOrderOnce` pose un verrou sur l'identifiant de paiement.
+  */
+  await new Promise((r) => setTimeout(r, 2000));
+  if (commandeConnue(await read<Order[]>(ORDERS, []))) {
+    return NextResponse.json({ ok: true, deja: true });
+  }
+
+  const brutMontant = donnees.final_amount ?? donnees.total ?? donnees.subtotal ?? donnees.amount;
+  const montantCents =
+    typeof brutMontant === "number" ? Math.round(brutMontant * 100)
+    : typeof brutMontant === "string" && brutMontant.trim() !== "" ? Math.round(parseFloat(brutMontant) * 100)
+    : undefined;
+
+  type Brouillon = { done?: boolean; at?: string; orderId?: string | null; draft?: CheckoutDraft };
+  const limite = Date.now() - 24 * 60 * 60 * 1000;
+  const candidats = (await listByPrefix<Brouillon>("pending_whop_"))
+    .filter((b) => !b.value?.done && (b.value?.draft?.email ?? "").trim().toLowerCase() === emailMeta)
+    .filter((b) => Date.parse(b.value?.at ?? b.updatedAt ?? "") >= limite)
+    .sort((x, y) => (y.value?.at ?? "").localeCompare(x.value?.at ?? ""));
+  const brouillon = candidats.find(
+    (b) => typeof montantCents === "number" && Math.abs((b.value.draft?.total ?? -1) - montantCents) <= 1,
+  );
+
+  if (!brouillon?.value.draft) {
+    console.warn(
+      "[webhook whop] paiement sans commande ni brouillon correspondant :",
+      paiementId,
+      type,
+      `montant ${montantCents ?? "inconnu"}`,
+      `${candidats.length} brouillon(s) pour cet e-mail`,
+    );
+    return NextResponse.json({ ok: true, orpheline: true });
+  }
+
+  const draft = brouillon.value.draft;
+  try {
+    const { orderId } = await createOrderOnce(`whop_${paiementId}`, `whop_done_${paiementId}`, async () => {
+      // Dernière vérification dans le verrou : la page a pu finir entre-temps.
+      if (commandeConnue(await read<Order[]>(ORDERS, []))) return "deja";
+      const { id } = await createOrder({
+        customer: draft.customer,
+        email: draft.email,
+        address: draft.address,
+        items: draft.items,
+        total: draft.total,
+        subtotal: draft.subtotal,
+        discounts: draft.discounts,
+        psp: "Whop",
+        phone: draft.phone,
+        pspRef: paiementId,
+        source: draft.source,
+      });
+      return id;
+    });
+    if (orderId && orderId !== "deja") {
+      await write(`whop_done_${paiementId}`, { done: true, orderId });
+      await write(brouillon.key, { ...brouillon.value, done: true, orderId });
+      console.info("[webhook whop] commande créée par le filet de sécurité :", orderId, paiementId);
+      return NextResponse.json({ ok: true, commande: orderId });
+    }
+    return NextResponse.json({ ok: true, deja: true });
+  } catch (e) {
+    console.error("[webhook whop] création de la commande impossible :", paiementId, e);
+    // 500 : Whop réessaiera plus tard.
+    return NextResponse.json({ error: "création impossible" }, { status: 500 });
+  }
+
 }

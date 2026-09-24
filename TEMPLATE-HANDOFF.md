@@ -101,7 +101,15 @@ Une **seule** entité (`lib/promotions.ts`, `Promotion`) couvre les deux besoins
 
 ## 4. Paiements — les trois règles non négociables
 
-Le hub gère 10 passerelles ; **5 sont réellement câblées** : Stripe (Payment Element), Square (Web Payments SDK), Fondy (checkout embarqué), **Airwallex** (Card Element embarqué) et **Genome** (page hébergée, redirection). Les autres (Zen, Viva, myPOS, Whop) n'ont que leurs champs de configuration. ⚠️ Airwallex et Genome sont câblés et testés techniquement mais **aucun paiement réel n'y est jamais passé** — à valider en sandbox avant le live.
+Le hub gère 10 passerelles ; **5 sont réellement câblées** : Stripe (Payment Element), Square (Web Payments SDK), Fondy (checkout embarqué), **Airwallex** (Card Element embarqué) et **Genome** (page hébergée, redirection). **Whop** est câblé et validé en production (voir 4.0). Les autres (Zen, Viva, myPOS) n'ont que leurs champs de configuration. ⚠️ Airwallex et Genome sont câblés et testés techniquement mais **aucun paiement réel n'y est jamais passé** — à valider en sandbox avant le live.
+
+### 4.0 Whop — passerelle par défaut (Whop Elements, validée par un vrai paiement)
+**Whop est câblé et en production** (Maison Romy Paris, 24/09/2026) via **Whop Elements** : `npm i @whop/elements`. L'ancien embed (`js.whop.com/static/checkout/loader.js`, `data-whop-checkout-*`) est coupé par Whop le 21/10/2026 — ne pas le réintroduire.
+- **Parcours** : `demarrerWhop` crée un plan EUR au prix exact du panier et met le brouillon à l'abri (`pending_whop_<ch_…>`, avec `planId`) → `WhopCheckout.tsx` monte l'élément `payment` (facturation masquée, carte + Apple/Google Pay seulement) → NOTRE bouton « Payer » crée un jeton (`createConfirmationToken`, identité du tunnel) → `payerWhopElements` débite côté serveur (`POST /api/v1/payments`, idempotent) → 3-D Secure par `handleNextAction` → `finaliserWhopElements` relit le paiement chez Whop et crée la commande (verrou `whop_<pay_id>`).
+- **Filets** : page `/checkout/confirmation` (retour 3-D Secure plein écran, rattrapage à 8/25/50 s), webhook qui crée la commande manquante depuis le brouillon, rattrapage `lib/payments/reconciliation.ts` réveillé par le trafic de `/checkout` (5 min).
+- ⚠️ **Ne pas utiliser l'élément « checkout » tout fait** (`whop.checkout.create`) : il redemande nom et adresse et affiche la devise du visiteur.
+- Le compte `biz_…` est déduit du produit parapluie (`societeWhop`) et mis en cache sous `whop_company_id`. La clé API doit porter `payment:charge`.
+- Numéros de commande : compteur `orders_seq`, un numéro supprimé ne ressert jamais.
 
 ### 4.1 Le tunnel ne connaît AUCUN PSP — comment en brancher un
 `components/shop/CheckoutClient.tsx` ne contient aucun `if (stripe)… if (square)…`. Il demande au registre `components/shop/payment/registry.tsx` si le PSP actif sait encaisser **sur place** ; sinon il redirige. **Brancher un PSP embarqué = 3 gestes, sans toucher au tunnel** :

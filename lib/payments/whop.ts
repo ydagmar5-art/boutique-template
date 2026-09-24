@@ -1,5 +1,6 @@
 import "server-only";
 import { WHOP_API_VERSION, WHOP_PRODUCT_ID } from "@/config/whop";
+import { messageWhop } from "@/lib/payments/messages-whop";
 
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
@@ -199,5 +200,126 @@ export async function creerSessionWhop(
     return { planId: corps.plan.id, sessionId: corps.id };
   } catch (e) {
     return { erreur: e instanceof Error ? e.message : "Whop injoignable." };
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   WHOP ELEMENTS — débit direct par jeton de confirmation
+   ════════════════════════════════════════════════════════════════════ */
+
+type PaiementBrut = {
+  id?: string;
+  status?: string;
+  substatus?: string;
+  client_secret?: string;
+  final_amount?: number;
+  subtotal?: number;
+  total?: number;
+  currency?: string;
+  failure_message?: string;
+  last_payment_error?: { message?: string | null } | null;
+  error?: { message?: string };
+};
+
+/** Message d'échec lisible, sans jargon, jamais « refusé » si ce n'est pas sûr. */
+function raisonEchec(p: PaiementBrut): string | undefined {
+  const sub = String(p.substatus ?? "").toLowerCase();
+  const st = String(p.status ?? "").toLowerCase();
+  const echoue = sub === "failed" || st === "failed" || sub === "canceled" || st === "void";
+  if (!echoue) return undefined;
+  return messageWhop(p.last_payment_error?.message || p.failure_message);
+}
+
+function lirePaiement(p: PaiementBrut) {
+  const st = String(p.status ?? "").toLowerCase();
+  const sub = String(p.substatus ?? "").toLowerCase();
+  const paye = st === "paid" || sub === "succeeded";
+  const brut = p.final_amount ?? p.total ?? p.subtotal;
+  return {
+    id: String(p.id ?? ""),
+    paye,
+    echec: paye ? undefined : raisonEchec(p),
+    clientSecret: p.client_secret || undefined,
+    montantCents: typeof brut === "number" ? Math.round(brut * 100) : undefined,
+  };
+}
+
+/**
+ * Débite un plan existant avec le jeton `ctok_…` produit par Whop Elements.
+ * ⚠️ Clé d'idempotence : un double clic ou un réseau qui rejoue la requête ne
+ * peut pas débiter deux fois.
+ */
+export async function chargerWhop(
+  cle: string,
+  corps: {
+    account_id: string;
+    confirmation_token: string;
+    plan_id: string;
+    email?: string;
+    return_url: string;
+    metadata: Record<string, string>;
+    cleIdempotence: string;
+  },
+): Promise<ReturnType<typeof lirePaiement> | { erreur: string }> {
+  const { cleIdempotence, ...body } = corps;
+  try {
+    const res = await fetch(`${API}/api/v1/payments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cle}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": cleIdempotence.slice(0, 255),
+        "User-Agent": "cheapsub-server",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+      cache: "no-store",
+    });
+    const p = (await res.json().catch(() => ({}))) as PaiementBrut;
+    if (!res.ok || !p.id) {
+      console.warn("[whop elements] débit refusé :", res.status, p.error?.message);
+      return {
+        erreur: messageWhop(
+          p.error?.message,
+          "Le paiement n'a pas pu être lancé. Vérifiez votre carte ou réessayez dans un instant.",
+        ),
+      };
+    }
+    return lirePaiement(p);
+  } catch {
+    return {
+      erreur:
+        "Nous n'avons pas eu de réponse du service de paiement. Ne recommencez pas tout de suite : si vous êtes débitée, votre confirmation s'affichera.",
+    };
+  }
+}
+
+/** Relit un paiement chez Whop. `null` si Whop ne répond pas. */
+export async function lirePaiementWhop(cle: string, id: string) {
+  try {
+    const r = await lire(`${API}/api/v1/payments/${encodeURIComponent(id)}`, cle);
+    if (!r.ok || !r.body) return null;
+    return lirePaiement(r.body as PaiementBrut);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compte Whop (`biz_…`) qui encaisse, déduit du produit parapluie.
+ *
+ * Whop Elements et le débit direct exigent l'identifiant de la SOCIÉTÉ, que le
+ * back-office ne demande pas : on le lit sur le produit (`company.id`) plutôt
+ * que d'ajouter un champ de plus à saisir — et de risquer une faute de frappe.
+ */
+export async function societeWhop(cle: string, produitId?: string): Promise<string | null> {
+  const produit = (produitId || WHOP_PRODUCT_ID).trim();
+  if (!cle.trim() || !produit) return null;
+  try {
+    const r = await lire(`${API}/api/v1/products/${encodeURIComponent(produit)}`, cle);
+    const id = (r.body as { company?: { id?: string } } | null)?.company?.id;
+    return r.ok && id?.startsWith("biz_") ? id : null;
+  } catch {
+    return null;
   }
 }

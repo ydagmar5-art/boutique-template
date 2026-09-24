@@ -48,7 +48,7 @@ import {
   stripeShipping,
 } from "@/lib/payments/identity";
 import { createOrderOnce } from "@/lib/payments/finalize";
-import { verifierRecuWhop, creerSessionWhop } from "@/lib/payments/whop";
+import { verifierRecuWhop, creerSessionWhop, chargerWhop, lirePaiementWhop, societeWhop } from "@/lib/payments/whop";
 import { sendTelegramAlert } from "@/lib/telegram";
 import { serverTotal, validateCart } from "@/lib/payments/cart";
 import { createOrder } from "@/lib/actions/orders";
@@ -1490,6 +1490,7 @@ export async function demarrerWhop(input: CheckoutDraft): Promise<{
   planId?: string;
   sessionId?: string;
   total?: number;
+  accountId?: string;
   error?: string;
 }> {
   const cfg = await getGatewayConfig("whop");
@@ -1511,5 +1512,258 @@ export async function demarrerWhop(input: CheckoutDraft): Promise<{
     cfg.credentials.productId,
   );
   if ("erreur" in res) return { error: res.erreur };
-  return { planId: res.planId, sessionId: res.sessionId, total: draft.total };
+
+  /* Compte Whop (`biz_…`) exigé par Whop Elements : déduit du produit, puis
+     gardé en cache pour ne pas le redemander à chaque paiement. */
+  const cache = await read<{ id?: string }>("whop_company_id", {});
+  let accountId = cache?.id ?? null;
+  if (!accountId) {
+    accountId = await societeWhop(cfg.credentials.apiKey ?? "", cfg.credentials.productId);
+    if (accountId) await write("whop_company_id", { id: accountId });
+  }
+  if (!accountId) return { error: "Compte Whop introuvable : vérifiez le produit Whop dans /admin/payments." };
+
+  /*
+    ⚠️ BROUILLON MIS À L'ABRI AVANT LE DÉBIT, avec le plan à débiter.
+    C'est LUI qui fait foi au paiement (`payerWhopElements` : montant, plan,
+    e-mail) et c'est par lui que le webhook et le rattrapage recréent une
+    commande dont le navigateur n'est jamais revenu.
+    ⚠️ Ne doit jamais bloquer le paiement : une erreur d'écriture est avalée.
+  */
+  try {
+    await write(`pending_whop_${res.sessionId}`, {
+      draft,
+      planId: res.planId,
+      done: false,
+      orderId: null,
+      at: new Date().toISOString(),
+    });
+  } catch {
+    /* le paiement continue */
+  }
+
+  return { planId: res.planId, sessionId: res.sessionId, total: draft.total, accountId };
+}
+
+/**
+ * La commande de cette session de paiement existe-t-elle déjà ?
+ *
+ * ⚠️ CE QUI RAMÈNE LA CLIENTE SUR SA PAGE DE CONFIRMATION. Le module Whop est
+ * censé prévenir le site quand le paiement aboutit. Il ne le fait pas
+ * toujours : le 20/09/2026, une cliente a payé 64 €, son navigateur n'a
+ * jamais rappelé le site, elle est restée devant un écran d'erreur et a écrit
+ * au service client. La commande, elle, avait bien été créée 14 secondes plus
+ * tard par le filet de sécurité.
+ *
+ * La page de paiement interroge donc le serveur toutes les trois secondes. Dès
+ * que le filet a posé le numéro de commande dans le brouillon, la cliente est
+ * emmenée sur sa confirmation — et c'est SON navigateur qui envoie l'achat aux
+ * régies, donc avec la bonne attribution publicitaire.
+ */
+export async function commandeDeLaSession(
+  sessionId: string,
+): Promise<{ orderId?: string }> {
+  const id = String(sessionId || "").trim();
+  if (!id) return {};
+  try {
+    const brouillon = await read<{ orderId?: string | null }>(
+      `pending_whop_${id}`,
+      {},
+    );
+    return brouillon?.orderId ? { orderId: brouillon.orderId } : {};
+  } catch {
+    /* Une lecture qui échoue ne doit pas casser la page de paiement. */
+    return {};
+  }
+}
+
+/**
+ * Whop Elements — appelé par /checkout/confirmation quand la commande tarde.
+ *
+ * ⚠️ Ne dépend ni du navigateur ni du webhook : demande directement à Whop ses
+ * derniers encaissements et crée la commande manquante (`reconcilierWhop`,
+ * idempotent par identifiant de paiement). Limité à un passage toutes les
+ * 15 s par session, et seulement pour une session réellement ouverte ici.
+ */
+export async function rattraperSessionWhop(
+  sessionId: string,
+): Promise<{ orderId?: string }> {
+  const id = String(sessionId || "").trim();
+  if (!/^ch_[A-Za-z0-9]+$/.test(id)) return {};
+  try {
+    const brouillon = await read<{
+      orderId?: string | null;
+      at?: string;
+      draft?: CheckoutDraft;
+    } | null>(`pending_whop_${id}`, null);
+    if (!brouillon?.draft) return {};
+    if (brouillon.orderId) return { orderId: brouillon.orderId };
+
+    const cleRepos = `whop_rattrapage_${id}`;
+    const dernier = await read<{ at?: string }>(cleRepos, {});
+    if (Date.now() - Date.parse(dernier?.at ?? "1970-01-01") >= 15_000) {
+      await write(cleRepos, { at: new Date().toISOString() });
+      const { reconcilierWhop } = await import("@/lib/payments/reconciliation");
+      await reconcilierWhop();
+    }
+
+    const deNouveau = await commandeDeLaSession(id);
+    if (deNouveau.orderId) return deNouveau;
+
+    /* La commande a pu être rattachée à une AUTRE session de la même visite
+       (même e-mail, même montant) : on la retrouve par la commande elle-même. */
+    const email = (brouillon.draft.email ?? "").trim().toLowerCase();
+    /* `date` d'une commande = jour seul (aaaa-mm-jj) : on compare des jours. */
+    const depuis = (brouillon.at ?? "").slice(0, 10);
+    const commandes = await read<{ id: string; email?: string; total?: number; date?: string }[]>(
+      "orders",
+      [],
+    );
+    const trouvee = commandes.find(
+      (o) =>
+        (o.email ?? "").trim().toLowerCase() === email &&
+        Math.abs((o.total ?? -1) - brouillon.draft!.total) <= 1 &&
+        (o.date ?? "").slice(0, 10) >= depuis,
+    );
+    return trouvee ? { orderId: trouvee.id } : {};
+  } catch {
+    return {};
+  }
+}
+
+type BrouillonWhop = {
+  draft?: CheckoutDraft;
+  planId?: string;
+  done?: boolean;
+  orderId?: string | null;
+  at?: string;
+};
+
+/**
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║  WHOP ELEMENTS — débit de la carte depuis NOTRE bouton « Payer » ║
+ * ╚══════════════════════════════════════════════════════════════════╝
+ *
+ * Le navigateur ne transmet qu'un jeton de confirmation (`ctok_…`) : la carte
+ * reste chez Whop. Tout le reste vient du SERVEUR — brouillon vérifié au
+ * démarrage (`pending_whop_<session>`), plan au prix exact du panier, e-mail.
+ * Un navigateur ne peut donc ni changer le montant, ni la devise.
+ *
+ * ⚠️ DEVISE : le plan est en EUR et on débite ce plan. Le module « checkout »
+ * de Whop convertissait dans la devise du visiteur (dirhams au Maroc) ; le
+ * débit direct, non.
+ *
+ * Réponse : la commande si le paiement est déjà abouti ; sinon le
+ * `clientSecret` que le navigateur passe à `handleNextAction` (3-D Secure).
+ */
+export async function payerWhopElements(input: {
+  sessionId: string;
+  confirmationToken: string;
+}): Promise<{ orderId?: string; paymentId?: string; clientSecret?: string; error?: string }> {
+  const sessionId = String(input.sessionId || "").trim();
+  const jeton = String(input.confirmationToken || "").trim();
+  if (!/^ch_[A-Za-z0-9]+$/.test(sessionId) || !jeton.startsWith("ctok_")) {
+    return { error: "Paiement incomplet. Rechargez la page et réessayez." };
+  }
+  const cfg = await getGatewayConfig("whop");
+  const cle = cfg?.credentials?.apiKey ?? "";
+  if (!cfg?.enabled || !cle) return { error: "Le paiement par carte est momentanément indisponible." };
+
+  const accountId = (await read<{ id?: string }>("whop_company_id", {}))?.id;
+  if (!accountId) return { error: "Le paiement par carte est momentanément indisponible." };
+
+  const brouillon = await read<BrouillonWhop | null>(`pending_whop_${sessionId}`, null);
+  if (!brouillon?.draft || !brouillon.planId) {
+    return { error: "Votre session de paiement a expiré. Rechargez la page et réessayez." };
+  }
+  if (brouillon.done && brouillon.orderId) return { orderId: brouillon.orderId };
+  const draft = brouillon.draft;
+
+  /* Retour après une étape bancaire hors page : l'hôte réellement servi
+     (www en production, localhost en test) — jamais une valeur du navigateur. */
+  const h = await headers();
+  const hote = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const origine = hote
+    ? `${hote.startsWith("localhost") ? "http" : "https"}://${hote}`
+    : (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
+  const r = await chargerWhop(cle, {
+    account_id: accountId,
+    confirmation_token: jeton,
+    plan_id: brouillon.planId,
+    email: draft.email,
+    return_url: `${origine}/checkout/confirmation?s=${encodeURIComponent(sessionId)}`,
+    metadata: {
+      boutique: brand.name,
+      email: draft.email || "",
+      session: sessionId,
+      panier: draft.items.map((i) => `${i.slug}x${i.qty}`).join(",").slice(0, 400),
+    },
+    cleIdempotence: `${sessionId}_${jeton}`,
+  });
+  if ("erreur" in r) return { error: r.erreur };
+
+  if (r.paye) {
+    const f = await finaliserWhopElements(sessionId, r.id);
+    if (f.orderId) return { orderId: f.orderId };
+  }
+  if (r.clientSecret) return { paymentId: r.id, clientSecret: r.clientSecret };
+  if (r.echec) return { error: r.echec };
+  /* Ni payé, ni refusé, ni étape à mener : le webhook tranchera. */
+  return { paymentId: r.id };
+}
+
+/**
+ * Crée la commande d'un paiement Whop Elements ABOUTI.
+ *
+ * ⚠️ Le statut est RELU chez Whop avec la clé API : le navigateur qui dit
+ * « c'est payé » n'est jamais cru. Montant contrôlé contre le panier
+ * (±1 centime). Même verrou que le webhook (`whop_<paiement>`) : jamais deux
+ * commandes pour un encaissement, quel que soit celui qui arrive en premier.
+ */
+export async function finaliserWhopElements(
+  sessionId: string,
+  paymentId: string,
+): Promise<{ orderId?: string; enAttente?: true; error?: string }> {
+  const sid = String(sessionId || "").trim();
+  const pid = String(paymentId || "").trim();
+  if (!/^ch_[A-Za-z0-9]+$/.test(sid) || !/^pay_[A-Za-z0-9]+$/.test(pid)) return { error: "Référence invalide." };
+  const cfg = await getGatewayConfig("whop");
+  const cle = cfg?.credentials?.apiKey ?? "";
+  if (!cle) return { enAttente: true };
+
+  const cleBrouillon = `pending_whop_${sid}`;
+  const brouillon = await read<BrouillonWhop | null>(cleBrouillon, null);
+  if (!brouillon?.draft) return { error: "Session introuvable." };
+  if (brouillon.done && brouillon.orderId) return { orderId: brouillon.orderId };
+  const draft = brouillon.draft;
+
+  const p = await lirePaiementWhop(cle, pid);
+  if (!p) return { enAttente: true };
+  if (p.echec) return { error: p.echec };
+  if (!p.paye) return { enAttente: true };
+  if (typeof p.montantCents === "number" && Math.abs(p.montantCents - draft.total) > 1) {
+    console.error("[whop elements] montant incohérent", pid, p.montantCents, draft.total);
+    return { error: "Le montant encaissé ne correspond pas à la commande — écrivez-nous." };
+  }
+
+  const { orderId } = await createOrderOnce(`whop_${pid}`, `whop_done_${pid}`, async () => {
+    const { id } = await createOrder({
+      customer: draft.customer,
+      email: draft.email,
+      address: draft.address,
+      items: draft.items,
+      total: draft.total,
+      subtotal: draft.subtotal,
+      discounts: draft.discounts,
+      psp: "Whop",
+      phone: draft.phone,
+      pspRef: pid,
+      source: draft.source,
+    });
+    return id;
+  });
+  if (!orderId) return { enAttente: true };
+  await write(`whop_done_${pid}`, { done: true, orderId });
+  await write(cleBrouillon, { ...brouillon, done: true, orderId });
+  return { orderId };
 }

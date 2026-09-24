@@ -2,6 +2,7 @@ import { brand } from "@/config/brand.config";
 import { PAYMENT_PROVIDERS } from "@/lib/payments/providers";
 import { publicConfigFor } from "@/lib/payments/public-config";
 import { getGateways } from "@/lib/actions/settings";
+import { reconcilierWhopSiNecessaire } from "@/lib/payments/reconciliation";
 import CheckoutClient, { type ActivePayment } from "@/components/shop/CheckoutClient";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ export default async function CheckoutPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  /* Rattrapage des ventes Whop encaissées sans commande : réveillé par le
+     trafic, au plus une fois toutes les 5 minutes (cf. reconciliation.ts). */
+  await reconcilierWhopSiNecessaire();
   const saved = await getGateways();
   const activeId = brand.payments.find((id) => saved[id]?.enabled);
 

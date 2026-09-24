@@ -50,6 +50,43 @@ export async function write<T>(name: string, data: T): Promise<void> {
 }
 
 /**
+ * Toutes les clés commençant par `prefix` (brouillons de paiement en attente,
+ * par exemple `pending_whop_`), avec leur date de mise à jour.
+ *
+ * ⚠️ `_` et `%` sont des jokers de LIKE : on les échappe, sinon
+ * `pending_whop_` attraperait aussi `pendingXwhopY…`.
+ */
+export async function listByPrefix<T>(
+  prefix: string,
+): Promise<{ key: string; value: T; updatedAt?: string }[]> {
+  if (hasDb()) {
+    const motif = prefix.replace(/[\\%_]/g, (c) => `\\${c}`) + "%";
+    const rows = await q<{ key: string; value: string; updated_at: Date | string | null }>(
+      `select \`key\`, \`value\`, \`updated_at\` from \`${KV}\` where \`key\` like ?`,
+      [motif],
+    );
+    return rows.map((r) => ({
+      key: r.key,
+      value: JSON.parse(r.value) as T,
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+    }));
+  }
+  await ensureDir();
+  const noms = (await fs.readdir(DATA_DIR).catch(() => [] as string[])).filter(
+    (n) => n.startsWith(prefix) && n.endsWith(".json"),
+  );
+  const out: { key: string; value: T }[] = [];
+  for (const n of noms) {
+    try {
+      out.push({ key: n.slice(0, -5), value: JSON.parse(await fs.readFile(path.join(DATA_DIR, n), "utf8")) as T });
+    } catch {
+      /* fichier illisible : ignoré */
+    }
+  }
+  return out;
+}
+
+/**
  * Verrou ATOMIQUE à usage unique.
  *
  * `read` puis `write` ne suffisent pas à garantir l'unicité : la page de retour

@@ -97,12 +97,18 @@ export async function createOrder(input: NewOrderInput): Promise<{ id: string }>
   const prefix: string = store.orders.prefix;
   const firstOrderNumber: number = store.orders.firstOrderNumber;
   const used = new Set(orders.map((o) => o.id));
+  /* ⚠️ …ni d'après les seules commandes EXISTANTES : une commande supprimée
+     (test, doublon) libérerait son numéro, alors qu'il a déjà servi dans un
+     e-mail, un reçu du PSP et les outils d'analyse. Le compteur `orders_seq`
+     garde le plus grand numéro jamais attribué. */
+  const seq = await read<{ n?: number }>("orders_seq", {});
   let num = orders.reduce((max, o) => {
     const n = Number.parseInt(o.id.replace(prefix, ""), 10);
     return Number.isFinite(n) && n > max ? n : max;
-  }, firstOrderNumber);
+  }, Math.max(firstOrderNumber, seq?.n ?? 0));
   let id = `${prefix}${++num}`;
   while (used.has(id)) id = `${prefix}${++num}`;
+  await write("orders_seq", { n: num });
   const order: Order = {
     id,
     customer: input.customer,
