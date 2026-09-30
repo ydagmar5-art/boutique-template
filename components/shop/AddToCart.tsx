@@ -14,6 +14,7 @@ export default function AddToCart({ product }: { product: Product }) {
   const router = useRouter();
   const add = useCart((s) => s.add);
   const close = useCart((s) => s.close);
+  const lines = useCart((s) => s.lines);
   const variants = product.variants.length ? product.variants : [DEFAULT_VARIANT];
   const [variantId, setVariantId] = useState(variants[0].id);
   const [added, setAdded] = useState(false);
@@ -52,8 +53,24 @@ export default function AddToCart({ product }: { product: Product }) {
     setTimeout(() => setAdded(false), 1600);
   };
 
+  /*
+    ⚠️ « ACHETER MAINTENANT » N'EMPILE PAS.
+
+    Cas observé le 20/09/2026 sur un enregistrement Clarity : la cliente
+    ajoute un sac au panier, continue sa visite, revient sur la fiche et clique
+    « Acheter maintenant ». Le sac était alors compté DEUX fois, et elle a
+    abandonné devant le total au moment de payer.
+
+    « Acheter maintenant » veut dire « je prends CE sac, tout de suite » : si
+    la ligne est déjà au panier, on n'ajoute rien et on va au paiement. Le
+    bouton « Ajouter au panier », lui, continue d'incrémenter — deux clics
+    dessus expriment bien l'envie de deux pièces.
+  */
   const handleBuyNow = () => {
-    addLine();
+    const dejaAuPanier = lines.some(
+      (l) => l.slug === product.slug && l.variantId === variant.id,
+    );
+    if (!dejaAuPanier) addLine();
     close();
     router.push("/checkout");
   };

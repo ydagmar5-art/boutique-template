@@ -3,7 +3,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import { brand } from "@/config/brand.config";
 import { formatPrice } from "@/lib/products";
 import type { Order, OrderItem } from "@/lib/db/seed";
-import { carrierLabel, trackingUrl } from "@/lib/carriers";
+import { lienSuiviClient } from "@/lib/carriers";
 import { SOURCE_LABEL, type SourceVente } from "@/lib/attribution";
 
 /**
@@ -174,10 +174,13 @@ function trackingCard(order: Order): string {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;border:1px solid ${C.line};">
     <tr><td style="padding:20px 22px;">
       <div style="font-family:${SANS};font-size:10px;letter-spacing:2.6px;text-transform:uppercase;color:${C.muted};">
-        Suivi ${carrierLabel(order.tracking.carrier)}
+        Numéro de suivi
       </div>
       <div style="font-family:'Courier New',monospace;font-size:19px;color:${C.ink};margin-top:8px;letter-spacing:1.5px;">
         ${order.tracking.number}
+      </div>
+      <div style="font-family:${SANS};font-size:12px;line-height:1.6;color:${C.muted};margin-top:12px;">
+        Copiez ce numéro, puis collez-le sur Postal Ninja pour suivre votre colis étape par étape.
       </div>
     </td></tr>
   </table>`;
@@ -193,8 +196,9 @@ function trackingCard(order: Order): string {
  * d'ailleurs est du greenwashing, devenu motif de contrôle prioritaire de la
  * DGCCRF. Si l'un des deux gestes cesse, cette section se retire.
  *
- * Le délai est ASSUMÉ, pas minimisé : annoncer sept à dix jours et les tenir
- * génère moins de réclamations qu'une promesse courte qu'on rate.
+ * ⚠️ DÉLAI : 3 à 5 jours ouvrés (consigne du gérant, 18/09/2026), le même
+ * que dans l'e-mail de confirmation, sur le site et dans le flux Merchant
+ * Center. L'ancien « sept à dix jours » contredisait tous les autres.
  */
 function deliveryNote(): string {
   return `
@@ -214,9 +218,7 @@ function deliveryNote(): string {
         planète qu'un colis qui voyage seul.
       </p>
       <p style="font-family:${SANS};font-size:14px;line-height:1.8;color:${C.ink};margin:14px 0 0;">
-        Ces deux gestes ajoutent quelques jours à votre attente : comptez
-        sept à dix jours. Nous préférons vous les annoncer que vous les
-        laisser découvrir.
+        Comptez 3 à 5 jours ouvrés pour la recevoir.
       </p>
     </td></tr>
   </table>`;
@@ -318,7 +320,7 @@ export async function sendOrderConfirmation(order: Order) {
       badge: "Commande confirmée",
       heading: first ? `Merci ${first}.` : "Merci.",
       // ⚠️ On annonce ICI le délai d'EXPÉDITION (48 h), pas celui de
-      // livraison : le détail des sept à dix jours appartient à l'e-mail
+      // livraison : le détail du délai (3 à 5 jours ouvrés) appartient à l'e-mail
       // d'expédition, où il est expliqué. Charger la confirmation d'un délai
       // long refroidit une cliente qui vient de payer.
       intro:
@@ -374,23 +376,24 @@ export async function sendOrderProcessing(order: Order) {
 }
 
 export async function sendOrderShipped(order: Order) {
-  const track = order.tracking ? trackingUrl(order.tracking) : "";
+  // Postal Ninja, quel que soit le transporteur (cf. `lienSuiviClient`).
+  const track = order.tracking ? lienSuiviClient(order.tracking) : "";
   return sendEmail({
     to: order.email,
     subject: `Votre commande ${order.id} est en route`,
     html: shell({
       preheader: order.tracking?.number
-        ? `Suivi ${carrierLabel(order.tracking.carrier)} : ${order.tracking.number}`
+        ? `Numéro de suivi : ${order.tracking.number}`
         : "Votre commande a quitté nos ateliers.",
       badge: "Expédiée",
       heading: "Votre commande est partie.",
       intro: order.tracking?.number
-        ? `Elle voyage avec <strong style="color:${C.ink};font-weight:400;">${carrierLabel(order.tracking.carrier)}</strong>. Voici le numéro qui vous permettra de la suivre jusqu'à votre porte.`
+        ? "Elle a quitté l'atelier. Voici le numéro qui vous permettra de la suivre jusqu'à votre porte."
         : "Elle a quitté nos ateliers et arrive bientôt chez vous.",
       body: trackingCard(order) + deliveryNote() + orderCard(order),
       // Le suivi transporteur prime sur le lien commande quand il existe.
       cta: track
-        ? { label: "Suivre mon colis", url: track }
+        ? { label: "Suivre sur Postal Ninja", url: track }
         : SITE
           ? { label: "Voir ma commande", url: `${SITE}/order/${order.id}` }
           : undefined,

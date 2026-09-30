@@ -73,6 +73,7 @@ export default async function CheckoutSuccess({
       items: pending.draft.items,
       total: pending.draft.total,
       psp: "Stripe",
+      mesure: pending.draft?.mesure,
     });
     await write(`pending_${sid}`, { ...pending, done: true, orderId: id });
     return id;

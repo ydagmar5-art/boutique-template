@@ -42,7 +42,31 @@ export function carrierLabel(id: string): string {
   return CARRIERS.find((c) => c.id === id)?.label ?? id;
 }
 
-/** Lien de suivi public, ou "" si le transporteur n'en expose pas. */
+/**
+ * Page de suivi Postal Ninja, commune à TOUS les transporteurs.
+ *
+ * ⚠️ Consigne du gérant : la cliente suit son colis sur Postal Ninja, quel
+ * que soit le transporteur réellement utilisé.
+ *
+ * ⚠️ CE LIEN N'EMPORTE PAS LE NUMÉRO. Postal Ninja n'offre aucune adresse
+ * qui ouvre directement un colis (vérifié le 18/09/2026) : `/fr/p/<numéro>`
+ * répond 404, `/fr/search?text=` est une recherche dans leur site, et le
+ * formulaire de `/fr/track` passe par une vérification Cloudflare avant
+ * d'afficher le résultat. La cliente colle donc le numéro elle-même — c'est
+ * pourquoi l'e-mail et la page commande l'affichent en grand, à côté du lien.
+ */
+export const POSTAL_NINJA = "https://postal.ninja/fr/track";
+
+/** Lien de suivi remis à la CLIENTE : Postal Ninja, ou "" sans numéro. */
+export function lienSuiviClient(tracking: OrderTracking): string {
+  return tracking.number.trim() ? POSTAL_NINJA : "";
+}
+
+/**
+ * Lien de suivi chez le transporteur lui-même, ou "" s'il n'en expose pas.
+ * Réservé au back-office : la cliente, elle, est envoyée sur Postal Ninja
+ * (`lienSuiviClient`).
+ */
 export function trackingUrl(tracking: OrderTracking): string {
   const carrier = CARRIERS.find((c) => c.id === tracking.carrier);
   const number = tracking.number.trim();

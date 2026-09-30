@@ -10,6 +10,12 @@ const FIELDS: { key: keyof PixelConfig; label: string; hint: string; icon: strin
   { key: "snapchat", label: "Snapchat Pixel", hint: "Pixel ID (ex : xxxx-xxxx-xxxx)", icon: "S" },
   { key: "pinterest", label: "Pinterest Tag", hint: "Tag ID (ex : 2612...)", icon: "P" },
   { key: "google", label: "Google Analytics 4", hint: "ID de mesure (ex : G-XXXXXXX)", icon: "G" },
+  {
+    key: "googleTag",
+    label: "Balise Google (chargement)",
+    hint: "ID de la balise Google (ex : GT-XXXXXXX). Vide = chargement par l'ID GA4",
+    icon: "G",
+  },
   { key: "googleAds", label: "Google Ads — identifiant", hint: "ID de conversion (ex : AW-123456789)", icon: "A" },
   {
     key: "googleAdsLabel",

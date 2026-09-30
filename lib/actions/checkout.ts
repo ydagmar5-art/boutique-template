@@ -56,6 +56,7 @@ import { read, write } from "@/lib/db/store";
 import { sendPaymentRefused } from "@/lib/emails";
 import type { OrderItem } from "@/lib/db/seed";
 import type { AppliedDiscount } from "@/lib/promotions";
+import type { MesureClient } from "@/lib/analytics/ga-serveur";
 
 export interface CheckoutDraft {
   customer: string;
@@ -88,6 +89,13 @@ export interface CheckoutDraft {
   city?: string;
   /** ISO 3166-1 alpha-2. Absent = France. */
   country?: string;
+  /*
+    Identifiant Google Analytics de la visiteuse, relevé dans ses cookies au
+    moment du paiement. Sert au serveur à envoyer l'achat à Google en le
+    rattachant à la bonne visite — donc au bon clic publicitaire — même si la
+    page de confirmation ne se charge jamais (cf. `lib/analytics/ga-serveur`).
+  */
+  mesure?: MesureClient;
 }
 
 async function origin(): Promise<string> {
@@ -160,6 +168,7 @@ export async function startCheckout(
       psp: "Test (paiement simulé)",
       phone: draft.phone,
       source: draft.source,
+      mesure: draft.mesure,
     });
     return { url: `/order/${id}` };
   }
@@ -438,6 +447,7 @@ export async function finalizeFondyPayment(
       phone: draft.phone,
       pspRef: status.paymentId || orderId,
       source: draft.source,
+      mesure: draft.mesure,
     });
     await write(fondyKey(orderId), { ...pending, done: true, orderId: id });
     return id;
@@ -613,6 +623,7 @@ export async function finalizeAirwallexPayment(input: {
           phone: input.draft.phone,
           pspRef: input.intentId,
           source: input.draft.source,
+          mesure: input.draft?.mesure,
         });
         await write(airwallexKey(input.intentId), {
           ...pending,
@@ -706,6 +717,7 @@ export async function finalizeAirwallexWallet(input: {
         phone: draft.phone,
         pspRef: input.intentId,
         source: draft.source,
+        mesure: draft.mesure,
       });
       // Le brouillon est conservé : le webhook s'en sert s'il repasse derrière.
       await write(airwallexKey(input.intentId), {
@@ -908,6 +920,7 @@ async function enregistrerCommandeViva(
       phone: draft.phone,
       pspRef: transactionId,
       source: draft.source,
+      mesure: draft.mesure,
     });
     await write(vivaKey(ref), { ...pending, done: true, orderId: id });
     return id;
@@ -1023,6 +1036,7 @@ export async function finalizeGenomePayment(
       phone: pending.draft.phone,
       pspRef: String(callback.transaction?.id ?? orderId),
       source: pending.draft?.source,
+      mesure: pending.draft?.mesure,
     });
     await write(genomeKey(orderId), { ...pending, done: true, orderId: id });
     return id;
@@ -1114,6 +1128,7 @@ export async function paySquare(request: {
       phone: input.draft.phone,
       pspRef: String(data.payment?.id ?? ""),
       source: input.draft.source,
+      mesure: input.draft?.mesure,
     });
     return { orderId: id };
   } catch (e) {
@@ -1218,6 +1233,7 @@ export async function finalizeStripePayment(
           phone: pending.draft.phone,
           pspRef: paymentIntentId,
           source: pending.draft.source,
+          mesure: pending.draft?.mesure,
         });
         await write(`pending_${paymentIntentId}`, {
           ...pending,
@@ -1374,6 +1390,7 @@ export async function finalizeMolliePayment(
       phone: pending.draft.phone,
       pspRef: pending.paymentId,
       source: pending.draft.source,
+      mesure: pending.draft?.mesure,
     });
     await write(mollieKey(reference), { ...pending, done: true, orderId: id });
     return id;
@@ -1458,6 +1475,7 @@ export async function payWhop(request: {
       phone: draft.phone,
       pspRef: recu,
       source: draft.source,
+      mesure: draft.mesure,
     });
     return id;
   });
@@ -1759,6 +1777,7 @@ export async function finaliserWhopElements(
       phone: draft.phone,
       pspRef: pid,
       source: draft.source,
+      mesure: draft?.mesure,
     });
     return id;
   });

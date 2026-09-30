@@ -21,7 +21,14 @@ import { EVENEMENT_CONSENTEMENT, lireConsentement, type Consentement } from "@/l
  * ⚠️ Il écoute l'événement de consentement : accepter fait apparaître les
  * pixels immédiatement, sans rechargement.
  */
-export default function PixelsConsentis({ pixels }: { pixels: PixelConfig }) {
+export default function PixelsConsentis({
+  pixels,
+  achatServeur = false,
+}: {
+  pixels: PixelConfig;
+  /** Achat envoyé par le serveur : voir `PixelScripts`. */
+  achatServeur?: boolean;
+}) {
   const [choix, setChoix] = useState<Consentement | null>(null);
 
   useEffect(() => {
@@ -33,5 +40,5 @@ export default function PixelsConsentis({ pixels }: { pixels: PixelConfig }) {
   }, []);
 
   if (choix !== "accepte") return null;
-  return <PixelScripts pixels={pixels} />;
+  return <PixelScripts pixels={pixels} achatServeur={achatServeur} />;
 }

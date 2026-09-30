@@ -69,6 +69,7 @@ export default async function SquareSuccess({
         items: pending.draft.items,
         total: pending.draft.total,
         psp: "Square",
+        mesure: pending.draft?.mesure,
       });
       await write(`pending_sq_${orderId}`, { ...pending, done: true, orderId: id });
       return id;

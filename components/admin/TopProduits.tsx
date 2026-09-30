@@ -49,9 +49,15 @@ export default function TopProduits() {
     const from = p.depuisMinuit
       ? new Date(new Date().setHours(0, 0, 0, 0))
       : new Date(to.getTime() - p.jours * 86400000);
+    /* Réponse d'une période abandonnée entre-temps : ignorée. */
+    let perimee = false;
     start(async () => {
-      setLignes(await getTopProduits(from.toISOString(), to.toISOString()));
+      const r = await getTopProduits(from.toISOString(), to.toISOString());
+      if (!perimee) setLignes(r);
     });
+    return () => {
+      perimee = true;
+    };
   }, [periode]);
 
   /* « sur la période » n'a pas de sens quand la période est la journée en

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { brand } from "@/config/brand.config";
 import { formatPrice } from "@/lib/products";
 import { getStats, type StatsResult } from "@/lib/actions/analytics";
@@ -70,13 +70,23 @@ export default function StatsExplorer({
   const [loading, setLoading] = useState(false);
   const [show, setShow] = useState({ views: true, revenue: true, cartAdds: true });
 
+  /* ⚠️ Seule la DERNIÈRE demande a le droit d'afficher. « 30 jours » met plus
+     de temps à répondre qu'« Aujourd'hui » : sans ce numéro, passer de l'un à
+     l'autre faisait réapparaître les chiffres de l'ancienne période quand sa
+     réponse arrivait en retard. */
+  const derniere = useRef(0);
   const load = () => {
     const [f, t] = rangeFor(preset, from, to);
+    const n = ++derniere.current;
     setLoading(true);
     getStats(f, t)
-      .then(setStats)
+      .then((r) => {
+        if (n === derniere.current) setStats(r);
+      })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (n === derniere.current) setLoading(false);
+      });
   };
 
   useEffect(() => {

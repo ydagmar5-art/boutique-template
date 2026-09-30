@@ -9,6 +9,8 @@ import { formatPrice } from "@/lib/products";
 import { startCheckout } from "@/lib/actions/checkout";
 import { quoteCart } from "@/lib/actions/promotions";
 import { pixelTrack } from "@/lib/pixel-events";
+import { mesureClient } from "@/lib/analytics/mesure-client";
+import { lireConsentement } from "@/lib/consentement";
 import type { AppliedDiscount } from "@/lib/promotions";
 import { embeddedPsp, type ConfirmFn } from "@/components/shop/payment/registry";
 import type { OrderItem } from "@/lib/db/seed";
@@ -191,6 +193,11 @@ export default function CheckoutClient({
       zip,
       city,
       country: "FR",
+      /* Identifiant Google Analytics de la visiteuse : c'est lui qui permet
+         au serveur d'attribuer la vente au clic publicitaire, même si la
+         page de confirmation ne se charge jamais. */
+      /* Sans consentement accepté, rien ne part chez Google (cf. ga-serveur.ts). */
+      mesure: lireConsentement() === "accepte" ? mesureClient() : { refus: true },
     };
   };
 
@@ -425,18 +432,18 @@ export default function CheckoutClient({
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-muted">Numéro de carte</span>
                   <div className="flex items-center gap-2 rounded-xl border border-line bg-bg px-4 py-3">
-                    <input inputMode="numeric" autoComplete="cc-number" placeholder="1234 1234 1234 1234" className="flex-1 bg-transparent text-sm outline-none" />
+                    <input inputMode="numeric" autoComplete="cc-number" placeholder="1234 1234 1234 1234" className="flex-1 bg-transparent text-base outline-none sm:text-sm" />
                     <span className="text-xs text-muted">VISA · MC</span>
                   </div>
                 </label>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium text-muted">Expiration</span>
-                    <input autoComplete="cc-exp" placeholder="MM / AA" className="w-full rounded-xl border border-line bg-bg px-4 py-3 text-sm outline-none focus:border-primary" />
+                    <input autoComplete="cc-exp" placeholder="MM / AA" className="w-full rounded-xl border border-line bg-bg px-4 py-3 text-base outline-none focus:border-primary sm:text-sm" />
                   </label>
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium text-muted">CVC</span>
-                    <input inputMode="numeric" autoComplete="cc-csc" placeholder="123" className="w-full rounded-xl border border-line bg-bg px-4 py-3 text-sm outline-none focus:border-primary" />
+                    <input inputMode="numeric" autoComplete="cc-csc" placeholder="123" className="w-full rounded-xl border border-line bg-bg px-4 py-3 text-base outline-none focus:border-primary sm:text-sm" />
                   </label>
                 </div>
               </div>
@@ -507,7 +514,18 @@ export default function CheckoutClient({
             </section>
           )}
 
-          {error && <p className="text-sm text-secondary">{error}</p>}
+          {error && (
+            <div className="space-y-1">
+              <p className="text-sm text-secondary">{error}</p>
+              {/* Même garde-fou que dans le module Whop : une cliente débitée
+                  ne doit jamais croire qu'elle doit repayer. */}
+              <p className="text-xs leading-relaxed text-muted">
+                Si votre banque a validé le paiement, ne payez pas une seconde fois :
+                nous vérifions automatiquement et votre confirmation s&apos;affichera
+                dans quelques secondes.
+              </p>
+            </div>
+          )}
 
           {/*
             ⚠️ Un libellé « Traitement… » FIXE se lit comme un plantage : entre
@@ -612,7 +630,7 @@ export default function CheckoutClient({
                 }}
                 placeholder="Code promo"
                 aria-label="Code promo"
-                className="min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 py-2.5 text-sm uppercase outline-none focus:border-primary"
+                className="min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 py-2.5 text-base uppercase outline-none focus:border-primary sm:text-sm"
               />
               <button
                 type="button"
@@ -732,7 +750,15 @@ function Field({
         autoComplete={autoComplete}
         placeholder={placeholder}
         onBlur={onBlur ? (e) => onBlur(e.currentTarget.value) : undefined}
-        className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none transition placeholder:text-muted/50 focus:border-primary"
+        /*
+          ⚠️ 16 px SUR MOBILE, PAS 14. En dessous de 16 px, iOS zoome
+          automatiquement dès qu'on touche un champ : la page grossit, déborde,
+          et la cliente se retrouve à la faire glisser de gauche à droite pour
+          finir de remplir son adresse. C'est l'une des premières causes
+          d'abandon au paiement sur iPhone. Au-delà de 640 px, on revient à la
+          taille d'origine.
+        */
+        className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-base outline-none transition placeholder:text-muted/50 focus:border-primary sm:text-sm"
       />
     </label>
   );

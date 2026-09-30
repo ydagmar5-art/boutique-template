@@ -111,6 +111,14 @@ Le hub gère 10 passerelles ; **5 sont réellement câblées** : Stripe (Payment
 - Le compte `biz_…` est déduit du produit parapluie (`societeWhop`) et mis en cache sous `whop_company_id`. La clé API doit porter `payment:charge`.
 - Numéros de commande : compteur `orders_seq`, un numéro supprimé ne ressert jamais.
 
+### 4.0 bis Correctifs de septembre 2026 (remontés de Maison Romy Paris)
+- **Suivi Google** : noms GA4 exacts (`view_item`, `add_to_cart`, `begin_checkout`, `purchase`), file d'attente tant que `gtag` n'est pas chargé, `view_item` sur la fiche (`ViewItemPixel`), aucun pixel hors production, champ « Balise Google » (`GT-…`) qui charge `gtag.js` (une balise G- fusionnée répond 404).
+- **Achat envoyé par le serveur** (Measurement Protocol, `lib/analytics/ga-serveur.ts`) à la création de la commande, avec le `client_id` capturé au tunnel (`mesure-client.ts`). GA4 ne dédoublonne PAS sur le numéro de commande : le navigateur n'envoie plus l'achat dès que le serveur le fait. **Respecte le consentement** : refus ou bandeau sans réponse = rien ne part. **Production seulement.** Activation : `node scripts/activer-suivi-serveur.mjs --propriete … --flux … --mesure G-… --projet …` (lancé par le gérant, la clé n'est jamais affichée).
+- **Tunnel** : champs en 16 px sur mobile + échelle verrouillée sur `/checkout` (plus de zoom iOS) ; « Acheter maintenant » n'ajoute pas un article déjà au panier.
+- **Flux Merchant Center** : `g:price` = prix de référence, `g:sale_price` si remise, `g:color` (coloris unique), `g:gender` / `g:age_group` à régler par boutique (`GENRE`, `TRANCHE_AGE` en tête de `app/feed.xml/route.ts`).
+- **Expédition** : lien de suivi universel (Postal Ninja), transporteur non nommé, délai 3 à 5 jours ouvrés (aligné sur le flux).
+- **Statistiques** : réponses d'une période abandonnée ignorées, tranches à l'heure de Paris.
+
 ### 4.1 Le tunnel ne connaît AUCUN PSP — comment en brancher un
 `components/shop/CheckoutClient.tsx` ne contient aucun `if (stripe)… if (square)…`. Il demande au registre `components/shop/payment/registry.tsx` si le PSP actif sait encaisser **sur place** ; sinon il redirige. **Brancher un PSP embarqué = 3 gestes, sans toucher au tunnel** :
 1. `lib/payments/public-config.ts` → les clés **publiques** envoyées au navigateur (jamais un secret) ;

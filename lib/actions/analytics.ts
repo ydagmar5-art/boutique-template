@@ -340,17 +340,21 @@ export async function getStats(fromISO: string, toISO: string): Promise<StatsRes
   const spanMs = to.getTime() - from.getTime();
   const hourly = spanMs <= 2 * 24 * 3600 * 1000;
   const step = hourly ? 3600 * 1000 : 24 * 3600 * 1000;
+  /* ⚠️ Les tranches partent du DÉBUT DEMANDÉ (minuit du navigateur), pas de
+     minuit du serveur : l'hébergement tourne en UTC, et un `setHours(0)` ici
+     décalait chaque jour de deux heures par rapport à la France. Libellés à
+     l'heure de Paris pour la même raison. */
   const start = new Date(from);
-  if (hourly) start.setMinutes(0, 0, 0);
-  else start.setHours(0, 0, 0, 0);
+  if (hourly) start.setUTCMinutes(0, 0, 0);
+  const libelle = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    ...(hourly ? { hour: "numeric" } : { day: "numeric", month: "numeric" }),
+  });
 
   const series: StatPoint[] = [];
   for (let t = start.getTime(); t <= to.getTime(); t += step) {
     const end = t + step;
-    const d = new Date(t);
-    const label = hourly
-      ? `${d.getHours()}h`
-      : `${d.getDate()}/${d.getMonth() + 1}`;
+    const label = libelle.format(new Date(t)).replace(/\s?h$/, "") + (hourly ? "h" : "");
     series.push({
       label,
       views: views.filter((r) => {

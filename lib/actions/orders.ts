@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { brand } from "@/config/brand.config";
 import { store } from "@/config/store.config";
 import { countPromotionUse } from "@/lib/actions/promotions";
 import type { AppliedDiscount } from "@/lib/promotions";
@@ -22,6 +23,7 @@ import {
 } from "@/lib/emails";
 import { sendTelegramSale } from "@/lib/telegram";
 import { pousserSuiviAuPsp } from "@/lib/payments/tracking";
+import { envoyerAchatGA4, type MesureClient } from "@/lib/analytics/ga-serveur";
 
 /**
  * Transmet le suivi au processeur de paiement, sans jamais faire échouer
@@ -86,6 +88,8 @@ export interface NewOrderInput {
   phone?: string;
   /** Référence de la transaction chez le PSP. */
   pspRef?: string;
+  /** Identifiant Google Analytics de la visiteuse (cf. `ga-serveur.ts`). */
+  mesure?: MesureClient;
 }
 
 export async function createOrder(input: NewOrderInput): Promise<{ id: string }> {
@@ -167,6 +171,30 @@ export async function createOrder(input: NewOrderInput): Promise<{ id: string }>
     sendOrderConfirmation(order),
     sendMerchantNewOrder(order),
     sendTelegramSale(order),
+    /*
+      ⚠️ L'ACHAT PART D'ICI VERS GOOGLE ANALYTICS, PAS DU NAVIGATEUR.
+
+      La page de confirmation ne se charge pas toujours — les deux premières
+      ventes de la boutique ne l'ont jamais atteinte, et Google n'a donc rien
+      su de 153 € de chiffre d'affaires venu de la publicité. Envoyé ici, un
+      achat est transmis dès que la commande existe, quoi qu'il arrive ensuite
+      côté cliente.
+
+      Dans `allSettled` comme les e-mails : une statistique qui échoue ne doit
+      jamais faire échouer une commande déjà encaissée.
+    */
+    envoyerAchatGA4({
+      orderId: id,
+      value: input.total / 100,
+      currency: brand.currency,
+      mesure: input.mesure,
+      items: input.items.map((it) => ({
+        id: it.slug,
+        name: it.name,
+        price: it.unitPrice / 100,
+        quantity: it.qty,
+      })),
+    }),
   ]);
 
   return { id };

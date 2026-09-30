@@ -136,6 +136,7 @@ export async function reconcilierWhop(): Promise<{ creees: string[] }> {
             phone: draft.phone,
             pspRef: p.id,
             source: draft.source,
+            mesure: draft?.mesure,
           });
           return id;
         },

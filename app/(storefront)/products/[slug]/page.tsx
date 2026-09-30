@@ -16,6 +16,7 @@ import FrenchMark from "@/components/site/FrenchMark";
 import OfferFilm from "@/components/site/OfferFilm";
 import MaisonSection from "@/components/site/MaisonSection";
 import JsonLd from "@/components/site/JsonLd";
+import ViewItemPixel from "@/components/site/ViewItemPixel";
 import { ligneDuProduit } from "@/lib/collections";
 import {
   absolu,
@@ -124,6 +125,16 @@ export default async function ProductPage({
         ce serait mentir à la cliente.
       */}
       <JsonLd donnees={produitJsonLd(product, cites)} />
+      {/* Première marche du tunnel d'achat : « a regardé ce produit ». */}
+      <ViewItemPixel
+        item={{
+          id: product.slug,
+          name: product.name,
+          category: product.collection,
+          price: product.price / 100,
+          quantity: 1,
+        }}
+      />
       <JsonLd
         donnees={filArianeJsonLd([
           { nom: "Accueil", url: "/" },

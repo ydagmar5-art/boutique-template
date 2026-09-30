@@ -3,6 +3,7 @@ import Footer from "@/components/site/Footer";
 import CartDrawer from "@/components/site/CartDrawer";
 import Tracker from "@/components/site/Tracker";
 import PixelsConsentis from "@/components/site/PixelsConsentis";
+import { suiviServeurActif } from "@/lib/analytics/ga-serveur";
 import Consentement from "@/components/site/Consentement";
 import RouteChangePixel from "@/components/site/RouteChangePixel";
 import StripePreload from "@/components/shop/StripePreload";
@@ -40,7 +41,7 @@ export default async function StorefrontLayout({
         choix n'est pas « accepté », et le refus doit rester aussi simple que
         l'acceptation.
       */}
-      <PixelsConsentis pixels={pixels} />
+      <PixelsConsentis pixels={pixels} achatServeur={suiviServeurActif()} />
       <Consentement />
       <RouteChangePixel />
       {stripeKey && <StripePreload publishableKey={stripeKey} />}

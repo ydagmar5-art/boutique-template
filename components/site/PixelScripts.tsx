@@ -5,7 +5,36 @@ import { googleAdsSendTo, type PixelConfig } from "@/lib/pixels-types";
  * Injecte les pixels publicitaires configurés dans le back-office.
  * Chaque script n'est chargé que si son identifiant est renseigné.
  */
-export default function PixelScripts({ pixels }: { pixels: PixelConfig }) {
+export default function PixelScripts({
+  pixels,
+  achatServeur = false,
+}: {
+  pixels: PixelConfig;
+  /**
+   * L'achat part du SERVEUR (Measurement Protocol) : le navigateur ne doit
+   * plus l'envoyer, sinon il est compté deux fois. Calculé côté serveur par
+   * le gabarit (`suiviServeurActif()`), ce composant étant rendu côté client
+   * après consentement.
+   */
+  achatServeur?: boolean;
+}) {
+  /*
+    ╔════════════════════════════════════════════════════════════════╗
+    ║  AUCUN PIXEL HORS PRODUCTION                                   ║
+    ╚════════════════════════════════════════════════════════════════╝
+
+    ⚠️ Le 20/09/2026, un test lancé en local a envoyé un ACHAT de 64 € dans
+    le Google Analytics de la boutique : la même vente y est apparue deux
+    fois, et le chiffre d'affaires du jour était faux. Une session de
+    développement ne doit jamais toucher les statistiques réelles.
+
+    Le site local et les aperçus Vercel ne chargent donc plus aucun pixel.
+    Pour mesurer quelque chose, on teste en production, sur une page qui ne
+    déclenche pas d'achat.
+  */
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") return null;
+  if (!process.env.VERCEL_ENV && process.env.NODE_ENV !== "production") return null;
+
   const sendTo = googleAdsSendTo(pixels);
   return (
     <>
@@ -59,20 +88,52 @@ pintrk('load','${pixels.pinterest}');pintrk('page');`}</Script>
       */}
       {(pixels.google || pixels.googleAds) && (
         <>
+          {/*
+            ⚠️ LE SCRIPT EST DEMANDÉ PAR L'IDENTIFIANT GOOGLE ADS EN PRIORITÉ.
+
+            Constaté le 18/09/2026 : `gtag/js?id=G-…` d'une boutique répondait 404. La
+            balise Analytics a été regroupée dans la balise Google Ads
+            AW-…, qui porte désormais les deux destinations (son
+            script contient le G-). Demander le script par le G- ne
+            chargeait RIEN : aucune vue, aucun panier, aucun achat ne partait,
+            ni vers Analytics ni vers Google Ads — `gtag` restait une simple
+            file d'attente que personne ne lisait.
+
+            Pour vérifier après tout changement de compte :
+            curl -s -o /dev/null -w '%{http_code}' \
+              'https://www.googletagmanager.com/gtag/js?id=<ID>'  → doit valoir 200
+          */}
           <Script
-            src={`https://www.googletagmanager.com/gtag/js?id=${pixels.google || pixels.googleAds}`}
+            src={`https://www.googletagmanager.com/gtag/js?id=${pixels.googleTag || pixels.googleAds || pixels.google}`}
             strategy="afterInteractive"
           />
           <Script id="px-google" strategy="afterInteractive">{`
 window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}
 gtag('js',new Date());
-${pixels.google ? `gtag('config',${JSON.stringify(pixels.google)});` : ""}
+${
+  /* ⚠️ Avec une balise Google (GT-), c'est ELLE qu'on configure : elle active
+     ses destinations, dont l'ID de mesure GA4. Configurer le G- directement
+     fait redemander son script propre, qui répond 404 : GA4 ne reçoit alors
+     rien (constaté le 18/09/2026). */
+  pixels.googleTag
+    ? `gtag('config',${JSON.stringify(pixels.googleTag)});`
+    : pixels.google
+      ? `gtag('config',${JSON.stringify(pixels.google)});`
+      : ""
+}
 ${pixels.googleAds ? `gtag('config',${JSON.stringify(pixels.googleAds)});` : ""}
 ${
   /* La destination de conversion est posée ici plutôt que passée en accessoire
      jusqu'à la page de confirmation : elle vient du back-office, et la faire
      traverser trois composants pour un seul usage n'apporterait rien. */
   sendTo ? `window.__pxGoogleAdsSendTo=${JSON.stringify(sendTo)};` : ""
+}${
+  /* ⚠️ ANTI-DOUBLON. Quand le serveur envoie lui-même l'achat à Analytics
+     (cf. `lib/analytics/ga-serveur.ts`), le navigateur ne doit PAS l'envoyer
+     une seconde fois : le chiffre d'affaires serait compté deux fois. Les
+     autres régies (Meta, Snap, Pinterest) continuent, elles, de recevoir
+     l'achat depuis la page de confirmation. */
+  achatServeur ? "window.__pxAchatServeur=true;" : ""
 }`}</Script>
         </>
       )}

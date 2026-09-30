@@ -53,9 +53,18 @@ export default function ConversionFunnel() {
     const days = PRESETS.find((p) => p.key === preset)!.days;
     const [from, to] = rangeFor(days);
     setLoading(true);
+    /* Réponse d'une période abandonnée entre-temps : ignorée. */
+    let perimee = false;
     getFunnel(from, to)
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((r) => {
+        if (!perimee) setData(r);
+      })
+      .finally(() => {
+        if (!perimee) setLoading(false);
+      });
+    return () => {
+      perimee = true;
+    };
   }, [preset]);
 
   const sessions = data?.steps[0]?.visitors ?? 0;

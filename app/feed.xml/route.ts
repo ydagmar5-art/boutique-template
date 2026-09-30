@@ -63,6 +63,20 @@ const CATEGORIE_GOOGLE = "543596";
  */
 const ETIQUETTE_PAR_DEFAUT = "produit-phare";
 
+/**
+ * Sexe et tranche d'âge — attendus par Merchant Center sur tout ce qui relève
+ * de l'habillement et des accessoires (sacs, bijoux, chaussures…). Sans eux,
+ * l'article reste diffusé mais signalé « Sexe manquant / Tranche d'âge
+ * manquante », et il sort des recherches filtrées.
+ *
+ * ⚠️ À RÉGLER PAR BOUTIQUE, d'après la cible RÉELLE du catalogue. Chaîne vide
+ * = attribut non envoyé (produits hors mode : électronique, maison…).
+ * Valeurs admises : `female`, `male`, `unisex` / `adult`, `kids`, `toddler`,
+ * `infant`, `newborn`.
+ */
+const GENRE = "";
+const TRANCHE_AGE = "";
+
 /** Échappement XML. Une esperluette nue suffit à rendre le flux illisible. */
 function xml(t: string): string {
   return t
@@ -104,6 +118,11 @@ function titre(p: Product): string {
   return t.length <= 150 ? t : t.slice(0, 147).trimEnd() + "…";
 }
 
+/** Prix de référence : l'ancien prix s'il est réellement supérieur, sinon le prix. */
+function prixReference(p: Product): number {
+  return p.compareAtPrice && p.compareAtPrice > p.price ? p.compareAtPrice : p.price;
+}
+
 function article(p: Product): string {
   const url = absolu(`/products/${p.slug}`);
   const images = p.images.map(absolu);
@@ -120,7 +139,18 @@ function article(p: Product): string {
     `<g:availability>${disponibilite(p)}</g:availability>`,
     // Prix en unités majeures, devise ISO. La société n'étant pas assujettie
     // à la TVA, le prix affiché EST le prix final — cf. `brand.legal.vatNotice`.
-    `<g:price>${(p.price / 100).toFixed(2)} ${brand.currency}</g:price>`,
+    /*
+      ⚠️ `g:price` = prix de RÉFÉRENCE, `g:sale_price` = prix remisé. Envoyer
+      le prix remisé seul dans `g:price` fait annoncer un tarif qui ne montre
+      pas la remise ; envoyer l'ancien prix sans `sale_price` fait annoncer un
+      prix plus haut que la fiche — motif de désapprobation (écart de prix).
+      Le prix barré n'est admis que s'il a été réellement pratiqué dans les
+      30 jours (art. L112-1-1) : cf. `components/shop/Price.tsx`.
+    */
+    `<g:price>${(prixReference(p) / 100).toFixed(2)} ${brand.currency}</g:price>`,
+    ...(prixReference(p) > p.price
+      ? [`<g:sale_price>${(p.price / 100).toFixed(2)} ${brand.currency}</g:sale_price>`]
+      : []),
     `<g:condition>new</g:condition>`,
     `<g:brand>${xml(brand.name)}</g:brand>`,
     // `mpn` + `brand` tiennent lieu d'identifiant unique tant qu'aucun
@@ -129,6 +159,13 @@ function article(p: Product): string {
     `<g:mpn>${xml(referenceFabricant(p))}</g:mpn>`,
     ...(p.gtin ? [`<g:gtin>${xml(p.gtin)}</g:gtin>`] : []),
     `<g:product_type>${xml(p.collection)}</g:product_type>`,
+    /* Couleur : celle du coloris RÉELLEMENT vendu, seulement quand la fiche
+       n'en a qu'un — l'inventer ferait diverger le flux de la fiche. */
+    ...(p.variants.length === 1 && p.variants[0]?.label
+      ? [`<g:color>${xml(p.variants[0].label)}</g:color>`]
+      : []),
+    ...(GENRE ? [`<g:gender>${GENRE}</g:gender>`] : []),
+    ...(TRANCHE_AGE ? [`<g:age_group>${TRANCHE_AGE}</g:age_group>`] : []),
     // Catégorie Google : renseignée plutôt que devinée. Laissée à
     // l'appréciation de Google, elle change sans prévenir, et un article
     // reclassé perd d'un jour à l'autre les enchères sur lesquelles il tournait.

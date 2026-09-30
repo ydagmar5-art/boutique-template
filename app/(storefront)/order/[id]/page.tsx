@@ -4,7 +4,7 @@ import { brand } from "@/config/brand.config";
 import { formatPrice } from "@/lib/products";
 import { getOrder } from "@/lib/actions/orders";
 import { listProducts } from "@/lib/actions/products";
-import { carrierLabel, trackingUrl } from "@/lib/carriers";
+import { lienSuiviClient } from "@/lib/carriers";
 import PurchasePixel from "@/components/site/PurchasePixel";
 import ClearCart from "@/components/site/ClearCart";
 
@@ -53,19 +53,28 @@ export default async function OrderConfirmation({
 
       {order.tracking?.number && (
         <div className="mt-10 rounded-2xl border border-line border-l-4 border-l-primary bg-surface p-6">
+          {/* ⚠️ Le transporteur n'est PAS nommé à la cliente (consigne du
+              gérant) : elle suit son colis sur Postal Ninja. */}
           <p className="text-xs uppercase tracking-widest text-muted">
-            Suivi {carrierLabel(order.tracking.carrier)}
+            Numéro de suivi
           </p>
           <p className="mt-1 font-mono text-lg">{order.tracking.number}</p>
-          {trackingUrl(order.tracking) && (
-            <a
-              href={trackingUrl(order.tracking)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-block rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-bg hover:opacity-90"
-            >
-              Suivre mon colis
-            </a>
+          {/* Postal Ninja, quel que soit le transporteur. Le lien n'emporte
+              pas le numéro (cf. `lienSuiviClient`) : d'où la consigne. */}
+          {lienSuiviClient(order.tracking) && (
+            <>
+              <p className="mt-2 text-sm text-muted">
+                Copiez ce numéro, puis collez-le sur Postal Ninja pour suivre votre colis.
+              </p>
+              <a
+                href={lienSuiviClient(order.tracking)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-block rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-bg hover:opacity-90"
+              >
+                Suivre sur Postal Ninja
+              </a>
+            </>
           )}
         </div>
       )}

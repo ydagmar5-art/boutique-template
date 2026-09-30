@@ -3,7 +3,7 @@
 /* Déclenche les événements de conversion sur tous les pixels chargés
    (Meta, TikTok, Snap, Pinterest, Google, Taboola) s'ils sont présents. */
 
-type PixelEvent = "AddToCart" | "InitiateCheckout" | "Purchase";
+type PixelEvent = "ViewItem" | "AddToCart" | "InitiateCheckout" | "Purchase";
 
 /** Un article envoyé aux régies. Prix unitaire en euros. */
 export interface PixelLineItem {
@@ -45,9 +45,24 @@ export async function pixelIdentify(email: string) {
   } catch {}
 }
 
-export function pixelTrack(event: PixelEvent, data: EventData = {}) {
+export function pixelTrack(event: PixelEvent, data: EventData = {}, essai = 0) {
   if (typeof window === "undefined") return;
   const w = window as any;
+  /*
+    ⚠️ ATTENDRE QUE LES PIXELS SOIENT POSÉS. Les scripts d'initialisation
+    (`PixelScripts`) s'exécutent APRÈS l'hydratation de la page. Une
+    visiteuse qui arrive directement sur une fiche — le cas de toute annonce
+    Shopping — déclenchait « vue produit » avant que `gtag` existe : l'appel
+    `w.gtag?.()` ne faisait rien, et l'événement était perdu sans erreur.
+
+    `gtag` sert de témoin : il est déclaré par le dernier des scripts
+    d'initialisation, donc les autres pixels sont prêts quand il l'est.
+    Plafond de 10 s : sans Google configuré, on envoie quand même.
+  */
+  if (!w.gtag && essai < 50) {
+    setTimeout(() => pixelTrack(event, data, essai + 1), 200);
+    return;
+  }
   const value = data.value;
   const currency = data.currency ?? "EUR";
   const items = data.items ?? [];
@@ -57,7 +72,9 @@ export function pixelTrack(event: PixelEvent, data: EventData = {}) {
   const money = value != null ? { value, currency } : {};
 
   try {
-    w.fbq?.("track", event, {
+    // Meta nomme « ViewContent » la consultation d'une fiche produit.
+    const fbEvent = event === "ViewItem" ? "ViewContent" : event;
+    w.fbq?.("track", fbEvent, {
       ...money,
       ...(ids.length
         ? { content_ids: ids, content_type: "product", num_items: quantity }
@@ -65,7 +82,8 @@ export function pixelTrack(event: PixelEvent, data: EventData = {}) {
     });
   } catch {}
   try {
-    const ttEvent = event === "Purchase" ? "CompletePayment" : event;
+    const ttEvent =
+      event === "Purchase" ? "CompletePayment" : event === "ViewItem" ? "ViewContent" : event;
     w.ttq?.track?.(ttEvent, {
       ...money,
       ...(items.length
@@ -84,7 +102,13 @@ export function pixelTrack(event: PixelEvent, data: EventData = {}) {
   } catch {}
   try {
     const snapEvent =
-      event === "Purchase" ? "PURCHASE" : event === "AddToCart" ? "ADD_CART" : "START_CHECKOUT";
+      event === "Purchase"
+        ? "PURCHASE"
+        : event === "AddToCart"
+          ? "ADD_CART"
+          : event === "ViewItem"
+            ? "VIEW_CONTENT"
+            : "START_CHECKOUT";
     w.snaptr?.("track", snapEvent, {
       ...(value != null ? { price: value, currency } : {}),
       ...(ids.length ? { item_ids: ids, number_items: quantity } : {}),
@@ -94,7 +118,13 @@ export function pixelTrack(event: PixelEvent, data: EventData = {}) {
   try {
     // Pinterest : événements standards (addtocart / checkout).
     const pinEvent =
-      event === "Purchase" ? "checkout" : event === "AddToCart" ? "addtocart" : "custom";
+      event === "Purchase"
+        ? "checkout"
+        : event === "AddToCart"
+          ? "addtocart"
+          : event === "ViewItem"
+            ? "pagevisit"
+            : "custom";
     const pinData: Record<string, unknown> = { ...money, order_quantity: quantity };
     if (data.orderId) pinData.order_id = data.orderId;
     if (items.length) {
@@ -122,8 +152,24 @@ export function pixelTrack(event: PixelEvent, data: EventData = {}) {
       ...(data.orderId ? { transaction_id: data.orderId } : {}),
       ...(gaItems.length ? { items: gaItems } : {}),
     };
-    if (event === "Purchase") w.gtag?.("event", "purchase", gaData);
-    else w.gtag?.("event", event.toLowerCase(), gaData);
+    /*
+      ⚠️ NOMS GA4 EXACTS. `event.toLowerCase()` donnait « addtocart » et
+      « initiatecheckout » : GA4 les acceptait, mais comme événements
+      PERSONNALISÉS. Ils n'alimentaient donc ni les rapports e-commerce, ni le
+      tunnel d'achat, et ne pouvaient pas servir de conversion pour Google Ads.
+      Seuls ces noms-là sont reconnus (cf. documentation GA4 « recommended
+      events »).
+    */
+    const nomGa4: Record<PixelEvent, string> = {
+      ViewItem: "view_item",
+      AddToCart: "add_to_cart",
+      InitiateCheckout: "begin_checkout",
+      Purchase: "purchase",
+    };
+    /* ⚠️ L'achat part du SERVEUR quand le suivi serveur est actif : l'envoyer
+       aussi d'ici compterait la vente deux fois dans Analytics. */
+    const achatCoteServeur = event === "Purchase" && w.__pxAchatServeur === true;
+    if (!achatCoteServeur) w.gtag?.("event", nomGa4[event], gaData);
   } catch {}
   try {
     /*

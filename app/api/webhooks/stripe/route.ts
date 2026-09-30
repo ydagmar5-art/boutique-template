@@ -62,6 +62,7 @@ export async function POST(req: Request) {
                 items: pending.draft.items,
                 total: pending.draft.total,
                 psp: "Stripe",
+                mesure: pending.draft?.mesure,
               });
               await write(`pending_${session.id}`, { ...pending, done: true, orderId: id });
               return id;

@@ -305,6 +305,7 @@ export async function POST(req: Request) {
         phone: draft.phone,
         pspRef: paiementId,
         source: draft.source,
+        mesure: draft?.mesure,
       });
       return id;
     });

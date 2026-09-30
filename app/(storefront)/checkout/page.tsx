@@ -7,6 +7,26 @@ import CheckoutClient, { type ActivePayment } from "@/components/shop/CheckoutCl
 
 export const dynamic = "force-dynamic";
 
+/**
+ * ⚠️ ZOOM DÉSACTIVÉ SUR CETTE PAGE UNIQUEMENT.
+ *
+ * Sur iPhone, toucher un champ dont le texte fait moins de 16 px déclenche un
+ * zoom automatique : la page grossit, déborde, et la cliente doit la faire
+ * glisser de gauche à droite pour finir de saisir son adresse. Nos champs sont
+ * passés à 16 px, mais ceux de la CARTE vivent dans l'iframe de Whop, dont nous
+ * ne maîtrisons pas la typographie.
+ *
+ * Ce réglage verrouille donc l'échelle pour tout l'écran de paiement, iframe
+ * comprise. Il ne s'applique qu'ici : sur les fiches produit et le reste du
+ * site, le zoom au doigt reste disponible.
+ */
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default async function CheckoutPage({
   searchParams,
 }: {
