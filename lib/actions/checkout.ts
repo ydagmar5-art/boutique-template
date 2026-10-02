@@ -1677,6 +1677,22 @@ type BrouillonWhop = {
 export async function payerWhopElements(input: {
   sessionId: string;
   confirmationToken: string;
+  /**
+   * Coordonnées DÉFINITIVES, lues dans le formulaire au clic sur « Payer ».
+   *
+   * ⚠️ Le brouillon est enregistré quand le module de paiement se monte —
+   * c'est-à-dire dès que le formulaire devient VALIDE, donc dès la PREMIÈRE
+   * lettre de la ville. Sans cette mise à jour, la commande naissait avec
+   * « 83210 L » au lieu de « 83210 La Farlède » (incident du 02/10/2026,
+   * trois commandes touchées). Seules les coordonnées sont reprises : ni
+   * articles ni montant, qui restent ceux vérifiés par le serveur.
+   */
+  coordonnees?: Partial<
+    Pick<
+      CheckoutDraft,
+      "customer" | "email" | "address" | "phone" | "firstName" | "lastName" | "street" | "zip" | "city"
+    >
+  >;
 }): Promise<{ orderId?: string; paymentId?: string; clientSecret?: string; error?: string }> {
   const sessionId = String(input.sessionId || "").trim();
   const jeton = String(input.confirmationToken || "").trim();
@@ -1695,7 +1711,18 @@ export async function payerWhopElements(input: {
     return { error: "Votre session de paiement a expiré. Rechargez la page et réessayez." };
   }
   if (brouillon.done && brouillon.orderId) return { orderId: brouillon.orderId };
-  const draft = brouillon.draft;
+
+  const propre = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 200) : "");
+  const maj: Partial<CheckoutDraft> = {};
+  for (const [k, v] of Object.entries(input.coordonnees ?? {})) {
+    const val = propre(v);
+    if (val) (maj as Record<string, string>)[k] = val;
+  }
+  const draft: CheckoutDraft = { ...brouillon.draft, ...maj };
+  if (Object.keys(maj).length) {
+    /* Avant le débit : le webhook et le rattrapage relisent ce brouillon. */
+    await write(`pending_whop_${sessionId}`, { ...brouillon, draft });
+  }
 
   /* Retour après une étape bancaire hors page : l'hôte réellement servi
      (www en production, localhost en test) — jamais une valeur du navigateur. */

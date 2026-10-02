@@ -199,7 +199,23 @@ export default function WhopCheckout({
             }
 
             /* b. Débit côté serveur, sur le plan EUR de la session. */
-            const r = await payerWhopElements({ sessionId: session.sessionId, confirmationToken: jeton });
+            const r = await payerWhopElements({
+              sessionId: session.sessionId,
+              confirmationToken: jeton,
+              /* Coordonnées FINALES du formulaire : le brouillon serveur date
+                 du montage, quand la ville n'avait qu'une lettre. */
+              coordonnees: {
+                customer: draft.customer,
+                email: draft.email,
+                address: draft.address,
+                phone: draft.phone,
+                firstName: draft.firstName,
+                lastName: draft.lastName,
+                street: draft.street,
+                zip: draft.zip,
+                city: draft.city,
+              },
+            });
             if (r.orderId) return { orderId: r.orderId };
             if (r.error) return echec(r.error);
 
