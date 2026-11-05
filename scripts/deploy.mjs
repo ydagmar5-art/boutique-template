@@ -93,11 +93,13 @@ if (args.env) {
     const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(ligne);
     if (!m) continue;
     const value = m[2].trim().replace(/^["']|["']$/g, "");
-    if (value) vars.push({ name: m[1], value });
+    // ⚠️ L'API Hostinger attend `key` (et non `name`) depuis octobre 2026 :
+    // avec `name`, chaque variable est refusée (« env_vars.N.key field is required »).
+    if (value) vars.push({ key: m[1], value });
   }
 
   /* ⚠️ Contrôles qui évitent une boutique en ligne et cassée. */
-  const val = (n) => vars.find((v) => v.name === n)?.value || "";
+  const val = (n) => vars.find((v) => v.key === n)?.value || "";
   if (/localhost/.test(val("NEXT_PUBLIC_SITE_URL")))
     fail(
       "NEXT_PUBLIC_SITE_URL pointe encore sur localhost : les e-mails de commande\n" +
@@ -200,6 +202,9 @@ const lance = json(
     "hosting", "nodejs", "start-build", account, domain,
     "--source-type", "archive",
     "--source-options", JSON.stringify({ archive_path: "app.zip" }),
+    // ⚠️ Exigé par le CLI depuis octobre 2026 : dossier du package.json,
+    // relatif à public_html. L'archive s'extrait à la racine du site.
+    "--root-directory", ".",
     "--app-type", "next",
     "--node-version", "22",
     "--package-manager", "npm",
