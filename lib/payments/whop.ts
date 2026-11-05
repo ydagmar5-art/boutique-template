@@ -317,7 +317,11 @@ export async function societeWhop(cle: string, produitId?: string): Promise<stri
   if (!cle.trim() || !produit) return null;
   try {
     const r = await lire(`${API}/api/v1/products/${encodeURIComponent(produit)}`, cle);
-    const id = (r.body as { company?: { id?: string } } | null)?.company?.id;
+    /* ⚠️ Whop a renommé `company` en `account` sur le produit (constaté le
+       05/11/2026 : `company` absent, `account: { id: "biz_…" }` présent).
+       Sans ce repli, aucun compte trouvé → « paiement indisponible ». */
+    const corps = r.body as { company?: { id?: string }; account?: { id?: string } } | null;
+    const id = corps?.account?.id ?? corps?.company?.id;
     return r.ok && id?.startsWith("biz_") ? id : null;
   } catch {
     return null;

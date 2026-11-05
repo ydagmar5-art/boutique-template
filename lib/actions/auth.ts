@@ -28,8 +28,18 @@ function seedUsers(): User[] {
   ];
 }
 
+/**
+ * ⚠️ L'ADMIN VIENT TOUJOURS DES VARIABLES D'ENVIRONNEMENT. `read` sème la
+ * valeur par défaut en base au premier appel : la liste stockée gardait donc
+ * l'admin de la PREMIÈRE visite, et changer ADMIN_EMAIL / ADMIN_PASSWORD
+ * ensuite n'avait plus aucun effet (« identifiants incorrects » avec les
+ * nouveaux, constaté le 05/11/2026). On remplace l'admin stocké par celui
+ * des variables à chaque lecture ; les comptes clients restent ceux de la base.
+ */
 async function users() {
-  return read<User[]>(KEY, seedUsers());
+  const seed = seedUsers();
+  const enBase = await read<User[]>(KEY, seed);
+  return [seed[0], ...enBase.filter((u) => u.id !== "admin")];
 }
 
 export type AuthResult = { ok: true } | { ok: false; error: string };
