@@ -235,12 +235,13 @@ function button(label: string, url: string): string {
   </tr></table>`;
 }
 
-/** Monogramme M+R filaire, repris du site. Un SVG en e-mail ne passe pas
- *  partout : on redessine le lettrage en texte espacé, qui, lui, passe. */
+/** Nom de la marque en texte espacé : un SVG en e-mail ne passe pas partout,
+ *  le texte, lui, passe.
+ *  ⚠️ JAMAIS DE VILLE SOUS LE NOM (« PARIS » venait du modèle Maison Romy et
+ *  a survécu sur Casa Pilates) : la marque s'appelle `brand.name`, rien de plus. */
 function wordmark(): string {
   return `
-  <div style="font-family:${SANS};font-size:15px;letter-spacing:6px;color:${C.ink};">${brand.name}</div>
-  <div style="font-family:${SANS};font-size:8px;letter-spacing:5px;color:${C.muted};margin-top:6px;">PARIS</div>`;
+  <div style="font-family:${SANS};font-size:15px;letter-spacing:6px;color:${C.ink};">${brand.name}</div>`;
 }
 
 /**
@@ -301,7 +302,7 @@ function shell(opts: {
         </td></tr>
       </table>
       <p style="font-family:${SANS};font-size:10px;letter-spacing:1.5px;color:${C.muted};margin:18px 0 0;">
-        &copy; ${new Date().getFullYear()} ${brand.name} PARIS
+        &copy; ${new Date().getFullYear()} ${brand.name}
       </p>
     </td></tr>
   </table>
