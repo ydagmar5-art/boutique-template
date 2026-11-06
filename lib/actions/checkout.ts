@@ -1734,7 +1734,7 @@ export async function payerWhopElements(input: {
   const r = await chargerWhop(cle, {
     account_id: accountId,
     confirmation_token: jeton,
-    plan_id: brouillon.planId,
+    variant_id: brouillon.planId,
     email: draft.email,
     return_url: `${origine}/checkout/confirmation?s=${encodeURIComponent(sessionId)}`,
     metadata: {

@@ -1,6 +1,7 @@
 import "server-only";
 import { WHOP_API_VERSION, WHOP_PRODUCT_ID } from "@/config/whop";
 import { messageWhop } from "@/lib/payments/messages-whop";
+import { centimesWhop } from "@/lib/payments/montant-whop";
 
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
@@ -56,12 +57,8 @@ function extraireStatut(body: unknown): { statut?: string; montant?: number; dev
   // Certaines réponses enveloppent l'objet dans `data`.
   const n = (o.data && typeof o.data === "object" ? (o.data as Record<string, unknown>) : o);
   const statut = String(n.status ?? n.state ?? n.payment_status ?? "").toLowerCase();
-  // Whop exprime les montants en unités monétaires (float), pas en centimes.
-  const brut = n.final_amount ?? n.amount ?? n.total ?? n.subtotal;
-  const montant =
-    typeof brut === "number" ? Math.round(brut * 100)
-    : typeof brut === "string" && brut.trim() !== "" ? Math.round(parseFloat(brut) * 100)
-    : undefined;
+  // Nombre en unités (anciennes API) ou objet « Money » (nouvelles).
+  const montant = centimesWhop(n.final_amount, n.amount, n.total, n.subtotal);
   const devise = typeof n.currency === "string" ? n.currency.toUpperCase() : undefined;
   return { statut: statut || undefined, montant, devise };
 }
@@ -212,9 +209,10 @@ type PaiementBrut = {
   status?: string;
   substatus?: string;
   client_secret?: string;
-  final_amount?: number;
-  subtotal?: number;
-  total?: number;
+  /** Nombre (anciennes API) ou objet « Money » (depuis novembre 2026). */
+  final_amount?: unknown;
+  subtotal?: unknown;
+  total?: unknown;
   currency?: string;
   failure_message?: string;
   last_payment_error?: { message?: string | null } | null;
@@ -234,18 +232,21 @@ function lirePaiement(p: PaiementBrut) {
   const st = String(p.status ?? "").toLowerCase();
   const sub = String(p.substatus ?? "").toLowerCase();
   const paye = st === "paid" || sub === "succeeded";
-  const brut = p.final_amount ?? p.total ?? p.subtotal;
   return {
     id: String(p.id ?? ""),
     paye,
     echec: paye ? undefined : raisonEchec(p),
     clientSecret: p.client_secret || undefined,
-    montantCents: typeof brut === "number" ? Math.round(brut * 100) : undefined,
+    montantCents: centimesWhop(p.final_amount, p.total, p.subtotal),
   };
 }
 
 /**
  * Débite un plan existant avec le jeton `ctok_…` produit par Whop Elements.
+ *
+ * ⚠️ Whop a renommé le plan en « variant » (constaté le 06/11/2026) : l'API
+ * refuse `plan_id` avec « variant_id is required ». L'identifiant, lui, n'a
+ * pas changé (toujours `plan_…`).
  * ⚠️ Clé d'idempotence : un double clic ou un réseau qui rejoue la requête ne
  * peut pas débiter deux fois.
  */
@@ -254,7 +255,8 @@ export async function chargerWhop(
   corps: {
     account_id: string;
     confirmation_token: string;
-    plan_id: string;
+    /** Identifiant du plan créé pour la commande (`plan_…`). */
+    variant_id: string;
     email?: string;
     return_url: string;
     metadata: Record<string, string>;

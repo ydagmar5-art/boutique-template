@@ -6,6 +6,7 @@ import { getGatewayConfig } from "@/lib/payments/gateway-store";
 import { listByPrefix, read, write } from "@/lib/db/store";
 import type { CheckoutDraft } from "@/lib/actions/checkout";
 import type { Order } from "@/lib/db/seed";
+import { centimesWhop } from "@/lib/payments/montant-whop";
 
 /**
  * ╔══════════════════════════════════════════════════════════════════╗
@@ -42,8 +43,11 @@ interface PaiementWhop {
   substatus?: string;
   created_at?: string;
   user?: { email?: string };
-  final_amount?: number;
-  subtotal?: number;
+  customer_email?: string | null;
+  /** Nombre (anciennes API) ou objet « Money » (depuis novembre 2026). */
+  final_amount?: unknown;
+  total?: unknown;
+  subtotal?: unknown;
   currency?: string;
 }
 
@@ -73,7 +77,9 @@ export async function reconcilierWhop(): Promise<{ creees: string[] }> {
   const societe = (await read<{ id?: string }>("whop_company_id", {}))?.id;
   if (!societe) return { creees };
   const res = await fetch(
-    `https://api.whop.com/api/v1/payments?company_id=${encodeURIComponent(societe)}&per=20`,
+    /* ⚠️ `account_id` : Whop a renommé `company_id` (refusé en 400 depuis
+       novembre 2026). */
+    `https://api.whop.com/api/v1/payments?account_id=${encodeURIComponent(societe)}&first=20`,
     { headers: { Authorization: `Bearer ${cle}` }, cache: "no-store" },
   );
   if (!res.ok) {
@@ -92,8 +98,8 @@ export async function reconcilierWhop(): Promise<{ creees: string[] }> {
   const brouillons = await listByPrefix<Brouillon>("pending_whop_");
 
   for (const p of paiements) {
-    const email = (p.user?.email ?? "").trim().toLowerCase();
-    const montant = Math.round(((p.final_amount ?? p.subtotal ?? 0) as number) * 100);
+    const email = (p.user?.email ?? p.customer_email ?? "").trim().toLowerCase();
+    const montant = centimesWhop(p.final_amount, p.total, p.subtotal) ?? 0;
     if (!email || !montant) continue;
 
     /* Déjà enregistrée ? On compare la référence PSP, puis l'e-mail + montant. */

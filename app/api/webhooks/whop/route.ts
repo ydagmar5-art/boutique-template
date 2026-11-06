@@ -6,6 +6,7 @@ import { createOrderOnce } from "@/lib/payments/finalize";
 import { createOrder } from "@/lib/actions/orders";
 import type { CheckoutDraft } from "@/lib/actions/checkout";
 import type { Order } from "@/lib/db/seed";
+import { centimesWhop } from "@/lib/payments/montant-whop";
 
 // Le webhook attend quelques secondes avant de créer une commande manquante.
 export const maxDuration = 30;
@@ -261,11 +262,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, deja: true });
   }
 
-  const brutMontant = donnees.final_amount ?? donnees.total ?? donnees.subtotal ?? donnees.amount;
-  const montantCents =
-    typeof brutMontant === "number" ? Math.round(brutMontant * 100)
-    : typeof brutMontant === "string" && brutMontant.trim() !== "" ? Math.round(parseFloat(brutMontant) * 100)
-    : undefined;
+  // Nombre en unités (anciennes API) ou objet « Money » (nouvelles).
+  const montantCents = centimesWhop(donnees.final_amount, donnees.total, donnees.subtotal, donnees.amount);
 
   type Brouillon = { done?: boolean; at?: string; orderId?: string | null; draft?: CheckoutDraft };
   const limite = Date.now() - 24 * 60 * 60 * 1000;
