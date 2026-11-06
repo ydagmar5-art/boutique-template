@@ -66,6 +66,19 @@ export default function VisitorList() {
           </tbody>
         </table>
       )}
+      {/* ⚠️ Attribution exigée par la licence CC BY 4.0 de DB-IP, source de la
+          colonne « Ville » (voir lib/geo/ville.ts). Ne pas la retirer. */}
+      <p className="border-t border-line px-6 py-3 text-xs text-muted">
+        Ville approximative, déduite de l&apos;adresse IP ·{" "}
+        <a
+          href="https://db-ip.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-2 hover:text-ink"
+        >
+          IP Geolocation by DB-IP
+        </a>
+      </p>
     </div>
   );
 }

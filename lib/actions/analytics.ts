@@ -7,6 +7,7 @@ import { listProducts } from "@/lib/actions/products";
 import { getSession } from "@/lib/auth/session";
 import { store } from "@/config/store.config";
 import { isBotUserAgent } from "@/lib/analytics/bots";
+import { lieuDepuisIp } from "@/lib/geo/ville";
 
 const VISITS = store.db.visits;
 const VISITORS = store.db.visitors;
@@ -35,9 +36,9 @@ let colonneSource = true;
  *
  * ⚠️ CE QUI A CHANGÉ EN QUITTANT VERCEL. `x-vercel-ip-city` n'existe plus :
  * l'hébergement Hostinger ne fait aucune géolocalisation, il transmet
- * seulement l'adresse. La ville reste donc vide sauf si un intermédiaire en
- * pose une (Cloudflare devant le domaine, par exemple). Le back-office
- * affiche « Ville inconnue » dans ce cas — c'est normal, pas une panne.
+ * seulement l'adresse. Un en-tête de ville posé par un intermédiaire
+ * (Cloudflare devant le domaine) reste prioritaire ; à défaut, la ville est
+ * déduite de l'IP par la base locale `lib/geo/ville.ts`.
  */
 async function geoFromHeaders(): Promise<{ ip?: string; city?: string }> {
   try {
@@ -45,7 +46,7 @@ async function geoFromHeaders(): Promise<{ ip?: string; city?: string }> {
     const fwd = h.get("x-forwarded-for");
     const ip = (fwd ? fwd.split(",")[0] : h.get("x-real-ip"))?.trim() || undefined;
     const raw = h.get("cf-ipcity") || h.get("x-geo-city");
-    const city = raw ? decodeURIComponent(raw) : undefined;
+    const city = raw ? decodeURIComponent(raw) : lieuDepuisIp(ip);
     return { ip, city };
   } catch {
     return {};
@@ -256,7 +257,9 @@ export async function presenceEnLigne(): Promise<PresenceRow[]> {
     count: r.count,
     since: new Date(r.since).getTime(),
     ip: r.ip ?? undefined,
-    city: r.city ?? undefined,
+    /* Le premier battement part avant que la ville soit connue : on la
+       déduit de l'IP plutôt que d'afficher « Ville inconnue ». */
+    city: r.city ?? lieuDepuisIp(r.ip) ?? undefined,
     source: r.source ?? undefined,
   }));
 }
@@ -447,7 +450,8 @@ export async function getVisitors(limit = 50): Promise<VisitorRow[]> {
     lastPath: v.last_path ?? "—",
     lastSeen: new Date(v.last_seen).toISOString(),
     ip: v.ip ?? "—",
-    city: v.city ?? "—",
+    /* Visiteurs enregistrés avant la base IP → ville : déduite à l'affichage. */
+    city: v.city ?? lieuDepuisIp(v.ip) ?? "—",
     source: v.source ?? undefined,
   }));
 }
