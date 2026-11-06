@@ -1,6 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  /**
+   * ⚠️ Hostinger exécute la sortie « standalone » de Next.js, qui n'emporte
+   * que les fichiers repérés à la construction. La base « IP → ville » est
+   * lue par `fs` (lib/geo/ville.ts) : sans cette ligne, elle reste derrière
+   * et la colonne « Ville » du back-office est vide en production alors
+   * qu'elle marche en local.
+   */
+  outputFileTracingIncludes: {
+    "/**": ["./lib/geo/ip-lieux.bin.gz"],
+  },
   /** Upload des photos produit : la limite par défaut (1 Mo) refuserait une photo de téléphone. */
   experimental: {
     serverActions: { bodySizeLimit: "10mb" },
